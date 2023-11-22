@@ -328,13 +328,14 @@ def main():
     print(f'Policy name: {policy_name}')    
     banner()
 
-    if not os.path.exists(input_file):
-        print(f"Error: Input file '{input_file}' not found.")
-        sys.exit(1)
-
+    
     if not (args.input and args.network and args.blocklist):
         parser.print_help()
         parser.error("All three arguments (input, network, blocklist) are required.")
+
+    if not os.path.exists(input_file):
+        print(f"Error: Input file '{input_file}' not found.")
+        sys.exit(1)
         
     else:
         # STAGE 1 - comment to bypass this stage
