@@ -43,10 +43,10 @@ Example command:
     
     -   **`cli_class_cmd.txt`** - network class commands (example):
         
-        `classes modify network add net_1 1 -a 1.51.154.21 -s 32 \
-        classes modify network add net_1 2 -a 198.51.154.2 -s 32 \
-        ...
-        classes modify network add net_1 250 -a 19.1.14.0 -s 24` 
+        `classes modify network add net_1 1 -a 1.51.154.21 -s 32`\
+        `classes modify network add net_1 2 -a 198.51.154.2 -s 32`\
+        `...`\
+        `classes modify network add net_1 250 -a 19.1.14.0 -s 24`
         
     -   **`cli_blk_rule.txt`** - block list rule to create (example):
         
