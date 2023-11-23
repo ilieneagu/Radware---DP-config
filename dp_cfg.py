@@ -53,9 +53,9 @@ class Vision:
     def __init__(self, ip, username, password):
         self.ip = ip
         self.login_data = {"username": username, "password": password}
-        self.DPlock_path = f"/mgmt/system/config/tree/device/byip/{cfg.DefensePro_MGMT_IP}/"
-        self.DPclass_path = f"/mgmt/device/byip/{cfg.DefensePro_MGMT_IP}/config/rsBWMNetworkTable/"
-        self.DPBlkPol_path = f"/mgmt/device/byip/{cfg.DefensePro_MGMT_IP}/config/rsNewBlockListTable/"
+        
+        
+        
         self.base_url = "https://" + ip
         self.sess = Session()
         self.sess.headers.update({"Content-Type": "application/json"})
@@ -80,21 +80,24 @@ class Vision:
         else:
             exit(1)
 
-    def LockUnlockDP(self,action):
+    def LockUnlockDP(self,action,dp):
         #lock/unlock DP
+        self.DPlock_path = f"/mgmt/system/config/tree/device/byip/{dp}/"
         send_url = self.base_url + self.DPlock_path + action
         r = self.sess.post(url=send_url, verify=False)
         banner()
         print (action.capitalize(),"DP\n#Request headers:",r.request.headers)
         print("URL:",send_url)
         print("Status code:", r.status_code)
+        print("return code",r.status_code,r._content)
         banner()
     
-    def AddNetClass(self,net_class):
+    def AddNetClass(self,net_class,dp):
         #net_class is a dict with
             # key (used in the URL) = network_class_name/index"
             # value (used as json payload) = another dict with values (see below)
                 # { 'class_name/x : {'rsBWMNetworkAddress': '198.51.154.24', 'rsBWMNetworkMask': '32'} }
+        self.DPclass_path = f"/mgmt/device/byip/{dp}/config/rsBWMNetworkTable/"
         for net_name, json_data in net_class.items():
             print("Add network class...")
             send_url = self.base_url + self.DPclass_path + net_name
@@ -106,11 +109,12 @@ class Vision:
             banner("-")
         banner()
 
-    def AddBlkPolicy(self,bl_policy):
+    def AddBlkPolicy(self,bl_policy,dp):
         #bl_policy is a dict with"
             # key (used in the URL) = policy_name"
             # value (used as json payload) = another dict with values (see below)
                 # {'policy_name' : {'rsNewBlockListSrcNetwork': 'p2_1', 'rsNewBlockListDstNetwork': 'any'} }
+        self.DPBlkPol_path = f"/mgmt/device/byip/{dp}/config/rsNewBlockListTable/"
         for policy_name, json_data in bl_policy.items():
             print("Add Blocklist policy...")
             print(f"Policy name: {policy_name}, JSON payload: {json_data}")
@@ -124,11 +128,11 @@ class Vision:
             banner("-")
         banner()
 
-    def UpdatePolicies(self):
+    def UpdatePoliciesAllDP(self):
         print("Update policy...")
         #json_payload={"deviceIpAddresses":["172.27.200.169"]} data is a list of IPs
         key='deviceIpAddresses'
-        value=[cfg.DefensePro_MGMT_IP]
+        value=cfg.DefensePro_MGMT_IP
         json_payload = {key:value} # a Dict with value =>a LIST of IP
         sig_list_url = self.base_url + '/mgmt/device/multi/config/updatepolicies'
         print(sig_list_url)
@@ -136,6 +140,13 @@ class Vision:
         print(r.content)
         banner()
 
+    def UpdatePolicies(self,dp):
+        print("Update policy...")
+        sig_list_url = self.base_url + f'/mgmt/device/byip/{dp}/config/updatepolicies'
+        print(sig_list_url)
+        r = self.sess.post(url=sig_list_url, verify=False)
+        print("return code",r.status_code,r._content)
+        banner()
 
 def banner(char="="):
     print(char * 80)
@@ -352,6 +363,7 @@ def main():
 
         if args.push:
             print("Flag -p or --push is present. Sending config to Vision...")
+            print("For a large number of subnets it may take 1-2 minutes...")
             #print("\nDetails are located in ",output_log)
             original_stdout = sys.stdout
             with open(output_log, 'w') as f:
@@ -359,11 +371,12 @@ def main():
                 sys.stdout = f
                 sys.stderr = f
                 v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
-                v.LockUnlockDP('lock')
-                v.AddNetClass(net_class)
-                v.AddBlkPolicy(blk_policy)
-                v.UpdatePolicies()
-                v.LockUnlockDP('unlock')
+                for dp in cfg.DefensePro_MGMT_IP:
+                    v.LockUnlockDP('lock',dp)
+                    v.AddNetClass(net_class,dp)
+                    v.AddBlkPolicy(blk_policy,dp)
+                    v.UpdatePolicies(dp)
+                    v.LockUnlockDP('unlock',dp)
             sys.stdout = original_stdout
             print("\nScript execution finished.\nDetails are located in ",output_log)
         else:
