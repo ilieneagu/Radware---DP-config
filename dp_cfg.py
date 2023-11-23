@@ -39,7 +39,8 @@ import argparse
 from requests import Session
 import requests
 import config as cfg
-
+from urllib3.exceptions import MaxRetryError
+import socket
 
 subnet_list = 'subnet_list.txt'  # stage 1 outpout file and stage 2 input file 
 valid_subnets = 'valid_subnets.txt'  # stage 2 outpout file and stage 3 input file
@@ -53,9 +54,6 @@ class Vision:
     def __init__(self, ip, username, password):
         self.ip = ip
         self.login_data = {"username": username, "password": password}
-        
-        
-        
         self.base_url = "https://" + ip
         self.sess = Session()
         self.sess.headers.update({"Content-Type": "application/json"})
@@ -64,10 +62,18 @@ class Vision:
     def login(self):
         print("Login to Vision...")
         login_url = self.base_url + '/mgmt/system/user/login'
+
+        try:       
+            socket.gethostbyname(cfg.VISION_IP)
+        except socket.gaierror as e:
+            print(f"Name resolution error: {e}."+ F"\nPlease check 'config.py'")
+            exit(1)          
         try:
             r = self.sess.post(url=login_url, json=self.login_data, verify=False)
             r.raise_for_status()
             response = r.json()
+            print(r.content)
+            print(response)
         except (requests.exceptions.HTTPError, requests.exceptions.ConnectionError, requests.exceptions.SSLError,
                 requests.exceptions.Timeout, requests.exceptions.ConnectTimeout,
                 requests.exceptions.ReadTimeout) as err:
@@ -77,6 +83,7 @@ class Vision:
             self.sess.headers.update({"JSESSIONID": response['jsessionid']})
             #print("Auth Cookie is:  " + response) #'jsessionid'])
             #print(response) #'jsessionid'])
+            return(True)
         else:
             exit(1)
 
@@ -365,20 +372,23 @@ def main():
             print("Flag -p or --push is present. Sending config to Vision...")
             print("For a large number of subnets it may take 1-2 minutes...")
             #print("\nDetails are located in ",output_log)
-            original_stdout = sys.stdout
+            #original_stdout = sys.stdout
             with open(output_log, 'w') as f:
-                # Redirect stdout to the file
-                sys.stdout = f
-                sys.stderr = f
                 v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
-                for dp in cfg.DefensePro_MGMT_IP:
-                    v.LockUnlockDP('lock',dp)
-                    v.AddNetClass(net_class,dp)
-                    v.AddBlkPolicy(blk_policy,dp)
-                    v.UpdatePolicies(dp)
-                    v.LockUnlockDP('unlock',dp)
-            sys.stdout = original_stdout
-            print("\nScript execution finished.\nDetails are located in ",output_log)
+                if v.login:
+                    #Redirect stdout to the file
+                    sys.stdout = f
+                    sys.stderr = f
+                    for dp in cfg.DefensePro_MGMT_IP:
+                        v.LockUnlockDP('lock',dp)
+                        v.AddNetClass(net_class,dp)
+                        v.AddBlkPolicy(blk_policy,dp)
+                        v.UpdatePolicies(dp)
+                        v.LockUnlockDP('unlock',dp)
+                    sys.stdout = original_stdout
+                    print("\nScript execution finished.\nDetails are located in ",output_log)
+                else:
+                    print("Unable to login to Vision.")
         else:
             print("Flag -p or --push is not present. Config is not pushed to device.")
     
