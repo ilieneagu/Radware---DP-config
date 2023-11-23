@@ -5,7 +5,7 @@ This program allows configuration of DP device with network classes and block li
 After reading subnets from the file, CLI commands will be generated; the configuration can also be pushed to the DP.
 
 ## Prerequisites:
-Tested with Python 3.9
+Tested with Python 3.9.
 Please see requirements.txt for required packages
 
 You can install the required dependencies using the following command:\
