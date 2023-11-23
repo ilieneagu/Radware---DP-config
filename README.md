@@ -26,7 +26,7 @@ You need to modify `config.py` for your environment. Update the following parame
     
     -   `-i` or `--input`: File containing subnets. One subnet/line with an IP (for a host) or a subnet (/32 is accepted). Invalid subnets will be displayed and not processed. Example: `1.1.1.1/24`, `1.1.1.3/30` (not valid). Duplicate lines will be removed. Valid subnets will be saved to **`valid_subnets.txt`**.
         
-    -   `-n` or `--name`: Name of the network class to create. The script will append `_1`, `_2`, etc., for each network class created.\ Each class will have a maximum of 250 subnets.
+    -   `-n` or `--name`: Name of the network class to create. The script will append `_1`, `_2`, etc., for each network class created. Each class will have a maximum of 250 subnets.
         
     -   `-b` or `--blocklist`: Name of the blocklist to create. The script will append `_1`, `_2`, etc., for each blocklist rule created. Blocklist rule will be configured with default settings:        
         -   Source network: from the script
