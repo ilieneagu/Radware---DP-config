@@ -39,8 +39,8 @@ import argparse
 from requests import Session
 import requests
 import config as cfg
-from urllib3.exceptions import MaxRetryError
 import socket
+from contextlib import redirect_stdout, redirect_stderr
 
 subnet_list = 'subnet_list.txt'  # stage 1 outpout file and stage 2 input file 
 valid_subnets = 'valid_subnets.txt'  # stage 2 outpout file and stage 3 input file
@@ -72,8 +72,6 @@ class Vision:
             r = self.sess.post(url=login_url, json=self.login_data, verify=False)
             r.raise_for_status()
             response = r.json()
-            print(r.content)
-            print(response)
         except (requests.exceptions.HTTPError, requests.exceptions.ConnectionError, requests.exceptions.SSLError,
                 requests.exceptions.Timeout, requests.exceptions.ConnectTimeout,
                 requests.exceptions.ReadTimeout) as err:
@@ -93,7 +91,7 @@ class Vision:
         send_url = self.base_url + self.DPlock_path + action
         r = self.sess.post(url=send_url, verify=False)
         banner()
-        print (action.capitalize(),"DP\n#Request headers:",r.request.headers)
+        print (action.capitalize(),"DP:",dp)
         print("URL:",send_url)
         print("Status code:", r.status_code)
         print("return code",r.status_code,r._content)
@@ -106,7 +104,7 @@ class Vision:
                 # { 'class_name/x : {'rsBWMNetworkAddress': '198.51.154.24', 'rsBWMNetworkMask': '32'} }
         self.DPclass_path = f"/mgmt/device/byip/{dp}/config/rsBWMNetworkTable/"
         for net_name, json_data in net_class.items():
-            print("Add network class...")
+            print("DP: ",dp,"- Add network class...")
             send_url = self.base_url + self.DPclass_path + net_name
             print("URL:",send_url)
             print("Class name and index:",net_name)
@@ -123,7 +121,7 @@ class Vision:
                 # {'policy_name' : {'rsNewBlockListSrcNetwork': 'p2_1', 'rsNewBlockListDstNetwork': 'any'} }
         self.DPBlkPol_path = f"/mgmt/device/byip/{dp}/config/rsNewBlockListTable/"
         for policy_name, json_data in bl_policy.items():
-            print("Add Blocklist policy...")
+            print("DP: ",dp,"- Add Blocklist policy...")
             print(f"Policy name: {policy_name}, JSON payload: {json_data}")
             send_url = self.base_url + self.DPBlkPol_path + policy_name
             print("URL:",send_url)
@@ -148,7 +146,7 @@ class Vision:
         banner()
 
     def UpdatePolicies(self,dp):
-        print("Update policy...")
+        print("DP: ",dp,"- Update policy...")
         sig_list_url = self.base_url + f'/mgmt/device/byip/{dp}/config/updatepolicies'
         print(sig_list_url)
         r = self.sess.post(url=sig_list_url, verify=False)
@@ -373,22 +371,19 @@ def main():
             print("For a large number of subnets it may take 1-2 minutes...")
             #print("\nDetails are located in ",output_log)
             #original_stdout = sys.stdout
-            with open(output_log, 'w') as f:
-                v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
-                if v.login:
-                    #Redirect stdout to the file
-                    sys.stdout = f
-                    sys.stderr = f
-                    for dp in cfg.DefensePro_MGMT_IP:
-                        v.LockUnlockDP('lock',dp)
-                        v.AddNetClass(net_class,dp)
-                        v.AddBlkPolicy(blk_policy,dp)
-                        v.UpdatePolicies(dp)
-                        v.LockUnlockDP('unlock',dp)
-                    sys.stdout = original_stdout
+            v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
+            if v.login:
+                    with open(output_log, 'w') as output_file:
+                        with redirect_stdout(output_file), redirect_stderr(output_file):                    
+                            for dp in cfg.DefensePro_MGMT_IP:
+                                v.LockUnlockDP('lock',dp)
+                                v.AddNetClass(net_class,dp)
+                                v.AddBlkPolicy(blk_policy,dp)
+                                v.UpdatePolicies(dp)
+                                v.LockUnlockDP('unlock',dp)
                     print("\nScript execution finished.\nDetails are located in ",output_log)
-                else:
-                    print("Unable to login to Vision.")
+            else:
+                print("Unable to login to Vision.")
         else:
             print("Flag -p or --push is not present. Config is not pushed to device.")
     
