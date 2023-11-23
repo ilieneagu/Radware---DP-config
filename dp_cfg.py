@@ -1,35 +1,63 @@
 """
-Generates DP cli commands to add
-network classes and blocklist rules
-from a list of IP subnet/hosts
+Generates DP cli commands to add network classes and blocklist rules from a list of IP subnet/hosts
+Pushed config to DP
+
+Config file needed is config.py
+    # Sample config.py file
+    VISION_IP = "x.x.x.x"          # APSolute Vision IP or FQDN
+    VISION_USER = "my_user"        # APSolute Vision username
+    VISION_PASS = "my_password"    # APSolute Vision password
+    DefensePro_MGMT_IP = ["172.16.1.1", "10.1.1.1"]  # DefensePro IP list in this format
+
 ================
-example:
-
-input:
-145.13.164.171
-145.13.163.0/24
-
-cli class:
-classes modify network add blk_list_1 1 -a 145.13.164.171 -s 32
-classes modify network add blk_list_1 3 -a 145.13.163.0 -s 24
-
-cli blok list rule:
-dp block-allow-lists blocklist table create blk_list_1 -sn blk_list_1 -dn any_ipv4 -a drop
-=================
-
 This program has for stages:
-each stage uses an input file and an output file 
-the output file is used the next stage as input
-(see each function comments for more details)
 
-IF THE SUBNET LIST ARE ALREADY IN A VALIDATED LIST YOU CAN START AT STAGE 3
-
-Stages
+Stages:
 1) remove_duplicates - clean the data source for leading/trailling spaces and remove duplicate lines
 2) validate_subnet - validates each subnet from the list
 3) generate cli command for network classes from valid subnet list
 4) generate cli command for block list rules from the newwork classes created in step 3
+5) if -p flag is used config is sent to DP
 
+Program uses following arguments:
+
+-i or --input: File containing subnets.
+One subnet/line with an IP (for a host) or a subnet (/32 is accepted).
+Invalid subnets will be displayed and not processed. Example: 1.1.1.1/24, 1.1.1.3/30 (not valid). Duplicate lines will be removed. Valid subnets will be saved to valid_subnets.txt.
+
+-n or --name: Name of the network class to create.
+The script will append _1, _2, etc., for each network class created.
+Each class will have a maximum of 250 subnets.
+
+-b or --blocklist: Name of the blocklist to create.
+The script will append _1, _2, etc., for each blocklist rule created. Blocklist rule will be configured with default settings:
+    Source network: from the script
+    Destination network: any
+    Protocol: any
+    Port: any
+Example command: python de_cfg.py -i input_file.txt -n network_class_name -b blocklist_name
+
+Save CLI Commands to Files
+
+The above 3 arguments are ****mandatory**** ; the script will save the CLI commands into two files:
+
+cli_class_cmd.txt - network class commands (example):
+    classes modify network add net_1 1 -a 1.51.154.21 -s 32
+    classes modify network add net_1 2 -a 198.51.154.2 -s 32
+    ...
+    classes modify network add net_1 250 -a 19.1.14.0 -s 24
+
+cli_blk_rule.txt - block list rule to create (example):
+    dp block-allow-lists blocklist table create b1_1 -sn net1_1 -dn any_ipv4 -a drop
+
+Push Configuration to DP (Optional)
+
+If you also use the -p or --push argument,
+the configuration will be pushed to DefensePro with Vision API calls.
+Details of Vision commands will be saved to output.log.
+
+Example command:
+python dp_cfg.py -i input_file.txt -n network_class_name -b blocklist_name -p
 """
 
 import sys
@@ -261,7 +289,6 @@ def gen_cli_class_cmd(input_file_path, output_file_path,class_name,chunk=chunk_s
     output: classes modify network add 'class_name_X' 'row_number' -a 'ip_subnet' -s 'ip_mask'
     """
     net_class_api={}
-    
     print("Stage3: generate network class commands")
     with open(input_file_path, 'r') as input_file:
         lines = input_file.readlines()
@@ -338,12 +365,10 @@ def main():
     network_name = args.network
     policy_name = args.blocklist
   
-    # Your program logic here
     print(f'Input file: {input_file}')
     print(f'Network class name : {network_name}')
     print(f'Policy name: {policy_name}')    
     banner()
-
     
     if not (args.input and args.network and args.blocklist):
         parser.print_help()
@@ -368,9 +393,10 @@ def main():
 
         if args.push:
             print("Flag -p or --push is present. Sending config to Vision...")
-            print("For a large number of subnets it may take 1-2 minutes...")
+            print("Creating 1500 classes on 2 DP takes more than 4 minutes ...")
+            print("To see the progress open a 2nd terminal and run 'tail -f output.log'")
+
             #print("\nDetails are located in ",output_log)
-            #original_stdout = sys.stdout
             v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
             if v.login:
                     with open(output_log, 'w') as output_file:
