@@ -22,7 +22,7 @@ You need to modify `config.py` for your environment. Update the following parame
 `VISION_PASS = "my_password"    # APSolute Vision password`\
 `DefensePro_MGMT_IP = ["172.16.1.1", "10.1.1.1"]  # DefensePro IP list in this format`
     
-2.  **Run `de_cfg.py` with the following arguments:**
+2.  **Run `dp_cfg.py` with the following arguments:**
     
     -   `-i` or `--input`: File containing subnets. One subnet/line with an IP (for a host) or a subnet (/32 is accepted). Invalid subnets will be displayed and not processed. Example: `1.1.1.1/24`, `1.1.1.3/30` (not valid). Duplicate lines will be removed. Valid subnets will be saved to **`valid_subnets.txt`**.
         
@@ -35,7 +35,7 @@ You need to modify `config.py` for your environment. Update the following parame
         -   Port: any
     
 Example command:
-`python de_cfg.py -i input_file.txt -n network_class_name -b blocklist_name` 
+`python dp_cfg.py -i input_file.txt -n network_class_name -b blocklist_name` 
     
 3.  **Save CLI Commands to Files**
     
