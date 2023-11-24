@@ -302,7 +302,7 @@ def gen_cli_class_cmd(input_file_path, output_file_path,class_name,chunk=chunk_s
                     net_class_api.update({key:value})
                     if (j == 1 and i == 0 ) : print("Network class and index:",key,"\n...") 
             print("Network class and index:",key)
-    print(f"Output file '{output_file_path}' has been created.\nIt contains netwrok classes to be added.")
+    print(f"Output file '{output_file_path}' has been created.\nIt contains network classes to be added.")
     banner()
     return extract_values_from_dict(net_class_api)
 
