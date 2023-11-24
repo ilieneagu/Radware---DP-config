@@ -59,3 +59,6 @@ Example command:
     
     Example command:    
     `python dp_cfg.py -i input_file.txt -n network_class_name -b blocklist_name -p`
+
+# Disclaimer
+There is no warranty, expressed or implied, associated with this scripot. Use at your own risk.
