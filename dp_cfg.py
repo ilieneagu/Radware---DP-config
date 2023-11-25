@@ -379,16 +379,16 @@ def main():
         sys.exit(1)
         
     else:
-        # STAGE 1 - comment to bypass this stage
+        # STAGE 1 - clean file, remove duplicates
         remove_duplicates(input_file, subnet_list)
 
-        # STAGE 2 - comment to bypass this stage
+        # STAGE 2 - validate subnet lists
         validate_subnets(subnet_list, valid_subnets)
 
-        # STAGE 3
+        # STAGE 3 - generate cli commands for network class
         net_class  = gen_cli_class_cmd(valid_subnets,cli_class_cmd,network_name)
         
-        # STAGE 4
+        # STAGE 4 - generate cli commands for blocklist policy
         blk_policy = gen_cli_block_rule(cli_class_cmd,cli_blk_rule,policy_name)
 
         if args.push:
