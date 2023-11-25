@@ -121,9 +121,9 @@ class Vision:
         banner()
         print (action.capitalize(),"DP:",dp)
         print("URL:",send_url)
-        print("Status code:", r.status_code)
-        print("return code",r.status_code,r._content)
+        print("Status code",r.status_code,r._content)
         banner()
+        return(r.status_code)
     
     def AddNetClass(self,net_class,dp):
         #net_class is a dict with
@@ -402,7 +402,9 @@ def main():
                     with open(output_log, 'w') as output_file:
                         with redirect_stdout(output_file), redirect_stderr(output_file):                    
                             for dp in cfg.DefensePro_MGMT_IP:
-                                v.LockUnlockDP('lock',dp)
+                                if v.LockUnlockDP('lock',dp) != 200:
+                                    print("Unable to lock DP: ",dp)
+                                    continue
                                 v.AddNetClass(net_class,dp)
                                 v.AddBlkPolicy(blk_policy,dp)
                                 v.UpdatePolicies(dp)
