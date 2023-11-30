@@ -205,7 +205,7 @@ class Vision:
         banner()
         return json.loads(r.content)
     
-
+    #CYBERCONTROLLER ONLY
     def delTable(self,dp,table,key_name):
         if key_name == 'rsNewBlockListName' :
             print("DP: ",dp,"- Delete Blocklist rules...")
