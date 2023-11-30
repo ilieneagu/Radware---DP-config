@@ -394,6 +394,7 @@ def main():
     parser.add_argument('-n', '--network', type=str, help='Name of the Network class.')
     parser.add_argument('-b', '--blocklist', type=str, help='Name of Blocklist policy.')
     parser.add_argument('-p', '--push', action="store_true", help='Push config to device and update policy.')
+    parser.add_argument('-s', '--show', action="store_true", help='Show blocklist config.')
     parser.add_argument('-d', '--delete', action="store_true", help='Delete Blocklist rule and network classes and update policy.')
 
     # Parse the command-line arguments
