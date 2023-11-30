@@ -68,6 +68,7 @@ from requests import Session
 import requests
 import config as cfg
 import socket
+import json
 from contextlib import redirect_stdout, redirect_stderr
 
 subnet_list = 'subnet_list.txt'  # stage 1 outpout file and stage 2 input file 
@@ -75,7 +76,7 @@ valid_subnets = 'valid_subnets.txt'  # stage 2 outpout file and stage 3 input fi
 cli_class_cmd = 'cli_class_cmd.txt' # stage 3 outpout file and stage 4 input file
 cli_blk_rule = 'cli_blk_rule.txt' # stage 4 output file
 output_log = 'output.log'
-chunk_size=250
+chunk_size=2
 
 class Vision:
 
@@ -141,6 +142,7 @@ class Vision:
             print("return code",r.status_code,r._content)
             banner("-")
         banner()
+        return(r.status_code)
 
     def AddBlkPolicy(self,bl_policy,dp):
         #bl_policy is a dict with"
@@ -160,6 +162,7 @@ class Vision:
             #     print("return code",r.status_code,"\n",r._content)
             banner("-")
         banner()
+        return(r.status_code)
 
     def UpdatePoliciesAllDP(self):
         print("Update policy...")
@@ -178,9 +181,44 @@ class Vision:
         sig_list_url = self.base_url + f'/mgmt/device/byip/{dp}/config/updatepolicies'
         print(sig_list_url)
         r = self.sess.post(url=sig_list_url, verify=False)
-        print("return code",r.status_code,r._content)
+        print("return code",r.status_code,r.content)
         banner()
+        
+    def getNetTbl(self,dp):
+        print("DP: ",dp,"- Get NetClasses...")
+        sig_list_url = self.base_url + f'/mgmt/device/byip/{dp}/config/rsBWMNetworkTable?props=rsBWMNetworkName,rsBWMNetworkSubIndex'
+        print(sig_list_url)
+        r = self.sess.get(url=sig_list_url, verify=False)
+        print("return code",r.status_code)
+        banner()
+        return json.loads(r.content)
 
+    def getBlTbl(self,dp):
+        # function will return a dict 
+        # {'rsNewBlockListTable': [{'rsNewBlockListName': 'l', 'rsNewBlockListSrcNetwork': 'last4'}, {'rsNewBlockListName': 'n1_1', 'rsNewBlockListSrcNetwork': 'n1_1'},
+        # dict key =  table name ; dict values = another dict with key = BL rule names and value = source network names
+        print("DP: ",dp,"- Get Block List rules and src_network...")
+        sig_list_url = self.base_url + f'/mgmt/device/byip/{dp}/config/rsNewBlockListTable?props=rsNewBlockListName,rsNewBlockListSrcNetwork'
+        print(sig_list_url)
+        r = self.sess.get(url=sig_list_url, verify=False)
+        print("return code",r.status_code)
+        banner()
+        return json.loads(r.content)
+    
+    #CYBERCONTROLLER ONLY
+    def delTable(self,dp,table,key_name):
+        if key_name == 'rsNewBlockListName' :
+            print("DP: ",dp,"- Delete Blocklist rules...")
+        elif key_name == 'rsBWMNetworkTable' :
+            print("DP: ",dp,"- Delete Network classes...")
+        print(f'JSON payload: {table}')
+        sig_list_url = self.base_url + f'/mgmt/device/byip/{dp}/config/deletetablerows'
+        print(sig_list_url)
+        json_payload = table
+        r = self.sess.delete(url=sig_list_url, json=json_payload ,verify=False)
+        print("return code",r.status_code,r.content)
+        banner()        
+        
 def banner(char="="):
     print(char * 80)
 
@@ -356,47 +394,21 @@ def main():
     parser.add_argument('-n', '--network', type=str, help='Name of the Network class.')
     parser.add_argument('-b', '--blocklist', type=str, help='Name of Blocklist policy.')
     parser.add_argument('-p', '--push', action="store_true", help='Push config to device and update policy.')
-
+    parser.add_argument('-d', '--delete', action="store_true", help='Delete Blocklist rule and network classes and update policy.')
 
     # Parse the command-line arguments
     args = parser.parse_args()
     
     input_file = args.input
-    network_name = args.network
     policy_name = args.blocklist
-  
-    print(f'Input file: {input_file}')
-    print(f'Network class name : {network_name}')
-    print(f'Policy name: {policy_name}')    
-    banner()
+    network_name = args.network if args.network is not None else args.blocklist
     
-    if not (args.input and args.network and args.blocklist):
+    if not (args.blocklist):
         parser.print_help()
-        parser.error("All three arguments (input, network, blocklist) are required.")
-
-    if not os.path.exists(input_file):
-        print(f"Error: Input file '{input_file}' not found.")
-        sys.exit(1)
-        
-    else:
-        # STAGE 1 - clean file, remove duplicates
-        remove_duplicates(input_file, subnet_list)
-
-        # STAGE 2 - validate subnet lists
-        validate_subnets(subnet_list, valid_subnets)
-
-        # STAGE 3 - generate cli commands for network class
-        net_class  = gen_cli_class_cmd(valid_subnets,cli_class_cmd,network_name)
-        
-        # STAGE 4 - generate cli commands for blocklist policy
-        blk_policy = gen_cli_block_rule(cli_class_cmd,cli_blk_rule,policy_name)
-
-        if args.push:
-            print("Flag -p or --push is present. Sending config to Vision...")
-            print("Creating 1500 classes on 2 DP takes more than 4 minutes ...")
-            print("To see the progress open a 2nd terminal and run 'tail -f output.log'")
-
-            #print("\nDetails are located in ",output_log)
+        banner()
+        parser.error("Argument (blocklist) is required. Argument (input) is required to add new rules.")
+    elif args.delete:
+            print("Flag -d or --delete is present. Deleting BL rule. Login Vision...")
             v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
             if v.login:
                     with open(output_log, 'w') as output_file:
@@ -405,16 +417,88 @@ def main():
                                 if v.LockUnlockDP('lock',dp) != 200:
                                     print("Unable to lock DP: ",dp)
                                     continue
-                                v.AddNetClass(net_class,dp)
-                                v.AddBlkPolicy(blk_policy,dp)
-                                v.UpdatePolicies(dp)
+                                class_list = v.getNetTbl(dp)
+                                block_list = v.getBlTbl(dp)
+                                bl_item = [item for item in block_list.get('rsNewBlockListTable',[]) if item.get('rsNewBlockListName').startswith(policy_name + "_") ]
+                                idx_bl_to_delete = [item['rsNewBlockListName'] for item in bl_item]
+                                del_bl = {"table": "rsNewBlockListTable","indicesToDelete": idx_bl_to_delete}
+                                src_bl_to_delete = [item['rsNewBlockListSrcNetwork'] for item in bl_item]
+                                f_items = [item for item in class_list.get('rsBWMNetworkTable', []) if item.get('rsBWMNetworkName', '') in src_bl_to_delete]
+                                indices_to_delete = [f"{item['rsBWMNetworkName']}/{item['rsBWMNetworkSubIndex']}" for item in f_items]
+                                result_dict = {"table": "rsBWMNetworkTable","indicesToDelete": indices_to_delete}
+                                if not indices_to_delete:
+                                    banner()
+                                    print("DP: ",dp)
+                                    print("Blocklist rule that starts with: <",policy_name,"> not found.")
+                                    banner()
+                                else:
+                                    v.delTable(dp,del_bl,'rsNewBlockListName')
+                                    v.delTable(dp,result_dict,'rsBWMNetworkTable')
+                                    v.UpdatePolicies(dp)
                                 v.LockUnlockDP('unlock',dp)
                     print("\nScript execution finished.\nDetails are located in ",output_log)
             else:
-                print("Unable to login to Vision.")
+                    print("Unable to login to Vision.")
+    else:        
+        if not (args.input and args.blocklist):
+            banner()
+            parser.error("Arguments(input,blocklist) are required.")
+        elif not os.path.exists(input_file):
+            print(f"Error: Input file '{input_file}' not found.")
+            sys.exit(1)
         else:
-            print("Flag -p or --push is not present. Config is not pushed to device.")
-    
-        
+                print(f'Input file: {input_file}')
+                print(f'Network class name : {network_name}')
+                print(f'Policy name: {policy_name}')    
+                banner()
+
+                # STAGE 1 - clean file, remove duplicates
+                remove_duplicates(input_file, subnet_list)
+
+                # STAGE 2 - validate subnet lists
+                validate_subnets(subnet_list, valid_subnets)
+
+                # STAGE 3 - generate cli commands for network class
+                net_class  = gen_cli_class_cmd(valid_subnets,cli_class_cmd,network_name)
+            
+                # STAGE 4 - generate cli commands for blocklist policy
+                blk_policy = gen_cli_block_rule(cli_class_cmd,cli_blk_rule,policy_name)
+
+                if args.push:
+                    print("Flag -p or --push is present. Sending config to Vision...")
+                    print("Creating 1500 classes on 2 DP takes more than 4 minutes ...")
+                    print("To see the progress open a 2nd terminal and run 'tail -f output.log'")
+                    #print("\nDetails are located in ",output_log)
+                    v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
+                    if v.login:
+                            with open(output_log, 'w') as output_file:
+                                with redirect_stdout(output_file), redirect_stderr(output_file):                    
+                                    for dp in cfg.DefensePro_MGMT_IP:
+                                        if v.LockUnlockDP('lock',dp) != 200:
+                                            print("Unable to lock DP: ",dp)
+                                            continue
+                                        block_list = v.getBlTbl(dp)
+                                        bl_item = [item for item in block_list.get('rsNewBlockListTable',[]) if item.get('rsNewBlockListName').startswith(policy_name + "_") ]
+                                        idx_bl_to_delete = [item['rsNewBlockListName'] for item in bl_item]
+                                        val_bl = [item for item in idx_bl_to_delete if  policy_name + "_" in item]
+                                        if val_bl:
+                                            banner()
+                                            print("DP: ",dp)
+                                            print("Blocklist rule(s) already in place. Please use -d to delete 1st.")
+                                            print(val_bl)
+                                            banner()
+                                            v.LockUnlockDP('unlock',dp)
+                                            continue
+                                        else:
+                                            v.AddNetClass(net_class,dp)
+                                            v.AddBlkPolicy(blk_policy,dp)
+                                            v.UpdatePolicies(dp)
+                                            v.LockUnlockDP('unlock',dp)
+                            print("\nScript execution finished.\nDetails are located in ",output_log)
+                    else:
+                        print("Unable to login to Vision.")
+                else:
+                    print("Flag -p or --push is not present. Config is not pushed to device.")
+            
 if __name__ == '__main__':
     main()
