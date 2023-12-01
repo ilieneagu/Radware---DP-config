@@ -60,6 +60,7 @@ Example command:
 python dp_cfg.py -i input_file.txt -n network_class_name -b blocklist_name -p
 """
 
+import datetime
 import sys
 import os
 import ipaddress
@@ -71,12 +72,13 @@ import socket
 import json
 from contextlib import redirect_stdout, redirect_stderr
 
+timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 subnet_list = 'subnet_list.txt'  # stage 1 outpout file and stage 2 input file 
 valid_subnets = 'valid_subnets.txt'  # stage 2 outpout file and stage 3 input file
 cli_class_cmd = 'cli_class_cmd.txt' # stage 3 outpout file and stage 4 input file
 cli_blk_rule = 'cli_blk_rule.txt' # stage 4 output file
-output_log = 'output.log'
-chunk_size=2
+output_log = f'output_{timestamp}.log'
+chunk_size=8
 
 class Vision:
 
@@ -84,6 +86,7 @@ class Vision:
         self.ip = ip
         self.login_data = {"username": username, "password": password}
         self.base_url = "https://" + ip
+        self.byip_cfg_path = "/mgmt/device/byip"
         self.sess = Session()
         self.sess.headers.update({"Content-Type": "application/json"})
         self.login()
@@ -132,7 +135,7 @@ class Vision:
             # key (used in the URL) = network_class_name/index"
             # value (used as json payload) = another dict with values (see below)
                 # { 'class_name/x : {'rsBWMNetworkAddress': '198.51.154.24', 'rsBWMNetworkMask': '32'} }
-        self.DPclass_path = f"/mgmt/device/byip/{dp}/config/rsBWMNetworkTable/"
+        self.DPclass_path = self.byip_cfg_path + f"/{dp}/config/rsBWMNetworkTable/"
         for net_name, json_data in net_class.items():
             print("DP: ",dp,"- Add network class...")
             send_url = self.base_url + self.DPclass_path + net_name
@@ -150,7 +153,7 @@ class Vision:
             # key (used in the URL) = policy_name"
             # value (used as json payload) = another dict with values (see below)
                 # {'policy_name' : {'rsNewBlockListSrcNetwork': 'p2_1', 'rsNewBlockListDstNetwork': 'any'} }
-        self.DPBlkPol_path = f"/mgmt/device/byip/{dp}/config/rsNewBlockListTable/"
+        self.DPBlkPol_path = self.byip_cfg_path + f"/{dp}/config/rsNewBlockListTable/"
         for policy_name, json_data in bl_policy.items():
             print("DP: ",dp,"- Add Blocklist policy...")
             print(f"Policy name: {policy_name}, JSON payload: {json_data}")
@@ -179,33 +182,91 @@ class Vision:
 
     def UpdatePolicies(self,dp):
         print("DP: ",dp,"- Update policy...")
-        sig_list_url = self.base_url + f'/mgmt/device/byip/{dp}/config/updatepolicies'
+        sig_list_url = self.base_url + self.byip_cfg_path + f"/{dp}/config/updatepolicies"
         print(sig_list_url)
         r = self.sess.post(url=sig_list_url, verify=False)
         print("return code",r.status_code,r.content)
         banner()
         
-    def getNetTbl(self,dp):
-        print("DP: ",dp,"- Get NetClasses...")
-        sig_list_url = self.base_url + f'/mgmt/device/byip/{dp}/config/rsBWMNetworkTable?props=rsBWMNetworkName,rsBWMNetworkSubIndex'
-        print(sig_list_url)
-        r = self.sess.get(url=sig_list_url, verify=False)
-        print("return code",r.status_code)
-        banner()
-        return json.loads(r.content)
-
-    def getBlTbl(self,dp):
-        # function will return a dict 
-        # {'rsNewBlockListTable': [{'rsNewBlockListName': 'l', 'rsNewBlockListSrcNetwork': 'last4'}, {'rsNewBlockListName': 'n1_1', 'rsNewBlockListSrcNetwork': 'n1_1'},
-        # dict key =  table name ; dict values = another dict with key = BL rule names and value = source network names
-        print("DP: ",dp,"- Get Block List rules and src_network...")
-        sig_list_url = self.base_url + f'/mgmt/device/byip/{dp}/config/rsNewBlockListTable?props=rsNewBlockListName,rsNewBlockListSrcNetwork'
-        print(sig_list_url)
-        r = self.sess.get(url=sig_list_url, verify=False)
-        print("return code",r.status_code)
+    #replaced by getTable
+    # def getNetTbl(self,dp,search=None):
+    #     print("DP: ",dp,"- Get NetClasses...")
+    #     sig_list_url = self.base_url + self.byip_cfg_path + \
+    #                      f"/{dp}/config/rsBWMNetworkTable?props=rsBWMNetworkName,rsBWMNetworkSubIndex"
+    #     print(sig_list_url)
+    #     r = self.sess.get(url=sig_list_url, verify=False)
+    #     print("return code",r.status_code)
+        
         banner()
         return json.loads(r.content)
     
+    def delEntry(self,dp,table,name):
+        # [ {"rsNewBlockListName": "block3_1", "rsNewBlockListSrcNetwork": "False_1"},
+        # {"rsNewBlockListName": "block3_2", "rsNewBlockListSrcNetwork": "False_2"} ]
+        if name == "bl":
+            bl_names = [item["rsNewBlockListName"] for item in table]
+            for bl in bl_names:
+                sig_list_url = self.base_url + self.byip_cfg_path + f"/{dp}/config/rsNewBlockListTable/"+bl
+                r = self.sess.delete(url=sig_list_url, verify=False)
+                print(self.sess.delete.__name__ + "->" + sig_list_url)
+                print("return code",r.status_code,".",r.content)
+                banner()
+        elif "class":
+            # {'rsBWMNetworkName': 'any', 'rsBWMNetworkSubIndex': '0'}
+
+            # ex: net_id = [mylist_3/1,mylist_3/2]
+            net_id = [(item['rsBWMNetworkName'] + "/" + item['rsBWMNetworkSubIndex']) for item in table]
+            for net in net_id:
+                sig_list_url = self.base_url + self.byip_cfg_path + f"/{dp}/config/rsBWMNetworkTable/"+net
+                r = self.sess.delete(url=sig_list_url, verify=False)
+                print(self.sess.delete.__name__ + "->" + sig_list_url)
+                print("return code",r.status_code,".",r.content)
+                banner()
+
+    #get blocklist or network class table
+    def getTable(self,dp,table="bl",search=None):
+        # function will return a dict for blocklist table="bl" or network class table="class"
+        # dict key =  table name ; dict values = another dict with key = BL rule names and value = source network names
+        # block list
+        # {'rsNewBlockListTable': [{'rsNewBlockListName': 'l', 'rsNewBlockListSrcNetwork': 'last4'}, 
+        #                          {'rsNewBlockListName': 'n1_1', 'rsNewBlockListSrcNetwork': 'n1_1'}]}
+        #network class
+        # {"rsBWMNetworkTable": [{'rsBWMNetworkName': 'any', 'rsBWMNetworkSubIndex': '0'}, 
+        #                       {'rsBWMNetworkName': '1r_3', 'rsBWMNetworkSubIndex': '2'}]}
+        if table == "bl":
+            tbl_dict='rsNewBlockListTable'
+            tbl_item="rsNewBlockListName"
+            print("DP: ",dp,"- Get Block List rules and src_network...")
+            sig_list_url = self.base_url + self.byip_cfg_path + \
+                            f"/{dp}/config/rsNewBlockListTable?props=rsNewBlockListName,rsNewBlockListSrcNetwork"
+        elif table == "class":
+            tbl_dict="rsBWMNetworkTable"
+            tbl_item="rsBWMNetworkName"            
+            print("DP: ",dp,"- Get NetClasses...")
+            sig_list_url = self.base_url + self.byip_cfg_path + \
+                     f"/{dp}/config/rsBWMNetworkTable?props=rsBWMNetworkName,rsBWMNetworkSubIndex,rsBWMNetworkAddress,rsBWMNetworkMask"
+        else:
+            print("Table name required")
+            exit(1)    
+        print(sig_list_url)
+        r = self.sess.get(url=sig_list_url, verify=False)
+        list_items = json.loads(r.content)
+        print("return code",r.status_code)
+        banner()
+        if search:
+            list_name = [item for item in list_items.get(tbl_dict,"[]") \
+                            if item[tbl_item].startswith(search)]
+            return list_name
+        else:
+            list_name = [item for item in list_items.get(tbl_dict,"[]") ]
+            return list_name
+
+    def extract_list(self,list_items,table):
+        if table == "bl":
+            pass
+        else:
+            pass
+
     #CYBERCONTROLLER ONLY
     def delTable(self,dp,table,key_name):
         if key_name == 'rsNewBlockListName' :
@@ -219,7 +280,24 @@ class Vision:
         r = self.sess.delete(url=sig_list_url, json=json_payload ,verify=False)
         print("return code",r.status_code,r.content)
         banner()        
+
+def question(question):
+    # Example usage
+    # user_agrees = ask_yes_no_question("Do you want to proceed?")
+    # if user_agrees:
+    #     print("Great! Proceeding...")
+    # else:
+    #     print("Okay, stopping.")
+    while True:
+        user_input = input(f"{question} (yes/no): ").strip().lower()
         
+        if user_input == 'yes':
+            return True
+        elif user_input == 'no':
+            return False
+        else:
+            print("Invalid input. Please enter 'yes' or 'no'.")
+
 def banner(char="="):
     print(char * 80)
 
@@ -392,69 +470,97 @@ def main():
     parser = argparse.ArgumentParser(description = description,formatter_class=argparse.RawTextHelpFormatter)
     
     parser.add_argument('-i', '--input', type=str, help='Input file with list of networks.')
-    parser.add_argument('-n', '--network', type=str, help='Name of the Network class.')
-    parser.add_argument('-b', '--blocklist', type=str, help='Name of Blocklist policy.')
-    parser.add_argument('-p', '--push', action="store_true", help='Push config to device and update policy.')
-    parser.add_argument('-s', '--show', action="store_true", help='Show blocklist config.')
-    parser.add_argument('-d', '--delete', action="store_true", help='Delete Blocklist rule and network classes and update policy.')
+    parser.add_argument('-n', '--network', help='Name of the Network class. If not used it will have same name as blocklist.')
+    parser.add_argument('-b', '--blocklist', type=str, help='Blocklist policy that STARTS with this name.')
+    parser.add_argument('-p', '--push', action="store_true", help='Push config to device and update policy.Requires -i and -b.')
+    parser.add_argument('-sbl', '--showBL', action="store_true", help='Show (all-> if -b not used) blocklist names and source network.')
+    parser.add_argument('-snet', '--showNet', action="store_true", help='Show (all-> if -n not used) Network Classes names and index.')
+    parser.add_argument('-dbl', '--delBL', action="store_true", help='Delete Blocklist rule starting with a value. Requires -b')
+    parser.add_argument('-dnet', '--delNet', action="store_true", help='Delete Network Class(es) starting with a value. Requires -n')
 
     # Parse the command-line arguments
     args = parser.parse_args()
     
     input_file = args.input
     policy_name = args.blocklist
-    network_name = args.network if args.network is not None else args.blocklist
-
-    v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
-
+    network_name = args.network if args.network else args.blocklist
     
-    if not (args.blocklist):
+    v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
+    
+    if args.showBL:
+        for dp in cfg.DefensePro_MGMT_IP:
+            if args.blocklist:
+                #print("bl")
+                result=v.getTable(dp,"bl",policy_name)
+            else:
+                print("no bl")
+                result=v.getTable(dp,"bl")
+            if (result):
+                if policy_name:
+                    print("DP:",dp,"Blocklist rules STARTING with: <",policy_name,">\n",json.dumps(result,indent=1))
+                else:
+                    print("DP:",dp,"All blocklist rules.\n",json.dumps(result,indent=1))
+            else:
+                print("DP:",dp,"Blocklist rules starting with: <",policy_name,"> not in place.")
+    elif args.showNet:
+        for dp in cfg.DefensePro_MGMT_IP:
+            if args.network:
+                result=v.getTable(dp,"class",network_name)
+            else:
+                result=v.getTable(dp,"class")
+            if (result):
+                if network_name:
+                    print("DP:",dp,"Network Classes STARTING with : <",network_name,">\n",json.dumps(result,indent=1))
+                else:
+                    print("DP:",dp,"All Network classes.\n",json.dumps(result,indent=1))
+            else:
+                print("DP:",dp,"Network classes: <",network_name,"> - not in place.")    
+    elif args.delBL:
+        print("Flag -dbl is present. Deleting BL rule...")
+        if args.blocklist is  None:
+            print("Please specify blocklist to delete with <<-b>> ")
+        else:
+            for dp in cfg.DefensePro_MGMT_IP:
+                if v.LockUnlockDP('lock',dp) != 200:
+                    print("Unable to lock DP: ",dp)
+                    continue
+                result=v.getTable(dp,"bl",policy_name)
+                if result:
+                    print(json.dumps(result,indent=2))
+                else:
+                    print("DP:",dp,"Blocklist rules starting with: <",policy_name,"> - not in place.")
+                if result: #and question("delete ?"):
+                    with open(output_log, 'w') as output_file:
+                        #with redirect_stdout(output_file), redirect_stderr(output_file):
+                        v.delEntry(dp,result,"bl")
+                        v.UpdatePolicies(dp)
+                        v.LockUnlockDP('unlock',dp)
+                    print("\nScript execution finished.\nDetails are located in ",output_log)    
+    elif args.delNet:
+        print("Flag -dnet is present. Deleting Network class(es)...")
+        if args.network is  None:
+            print("Please specify Network class to delete  with <<-n>> ")
+        else:
+            for dp in cfg.DefensePro_MGMT_IP:
+                if v.LockUnlockDP('lock',dp) != 200:
+                    print("Unable to lock DP: ",dp)
+                    continue
+            result=v.getTable(dp,"class",network_name)
+            if (result):
+                print(json.dumps(result,indent=2))
+            else:
+                print("DP:",dp,"Network classes starting with: <",network_name,"> - not in place.")
+            if result: # and question("delete ?"):
+                with open(output_log, 'w') as output_file:
+                    #with redirect_stdout(output_file), redirect_stderr(output_file):
+                    v.delEntry(dp,result,"class")
+                    v.UpdatePolicies(dp)
+                    v.LockUnlockDP('unlock',dp)
+                print("\nScript execution finished.\nDetails are located in ",output_log)
+    elif not (args.blocklist):
         parser.print_help()
         banner()
         parser.error("Argument (blocklist) is required. Argument (input) is required to add new rules.")
-    elif args.delete:
-        print("Flag -d or --delete is present. Deleting BL rule...")
-        with open(output_log, 'w') as output_file:
-            with redirect_stdout(output_file), redirect_stderr(output_file):                    
-                for dp in cfg.DefensePro_MGMT_IP:
-                    if v.LockUnlockDP('lock',dp) != 200:
-                        print("Unable to lock DP: ",dp)
-                        continue
-                    class_list = v.getNetTbl(dp)
-                    block_list = v.getBlTbl(dp)
-                    bl_item = [item for item in block_list.get('rsNewBlockListTable',[]) if item.get('rsNewBlockListName').startswith(policy_name + "_") ]
-                    idx_bl_to_delete = [item['rsNewBlockListName'] for item in bl_item]
-                    del_bl = {"table": "rsNewBlockListTable","indicesToDelete": idx_bl_to_delete}
-                    src_bl_to_delete = [item['rsNewBlockListSrcNetwork'] for item in bl_item]
-                    f_items = [item for item in class_list.get('rsBWMNetworkTable', []) if item.get('rsBWMNetworkName', '') in src_bl_to_delete]
-                    indices_to_delete = [f"{item['rsBWMNetworkName']}/{item['rsBWMNetworkSubIndex']}" for item in f_items]
-                    result_dict = {"table": "rsBWMNetworkTable","indicesToDelete": indices_to_delete}
-                    if not indices_to_delete:
-                        banner()
-                        print("DP: ",dp)
-                        print("Blocklist rule that starts with: <",policy_name,"> not found.")
-                        banner()
-                    else:
-                        v.delTable(dp,del_bl,'rsNewBlockListName')
-                        v.delTable(dp,result_dict,'rsBWMNetworkTable')
-                        v.UpdatePolicies(dp)
-                    v.LockUnlockDP('unlock',dp)
-                print("\nScript execution finished.\nDetails are located in ",output_log)
-    elif (args.show):
-        for dp in cfg.DefensePro_MGMT_IP:
-            block_list = v.getBlTbl(dp)
-            bl_item = [item for item in block_list.get('rsNewBlockListTable',[]) if item.get('rsNewBlockListName').startswith(policy_name + "_") ]
-            idx_bl_to_delete = [item['rsNewBlockListName'] for item in bl_item]
-            val_bl = [item for item in idx_bl_to_delete if  policy_name  in item]
-            if val_bl:
-                bl_list = [{'BlockListName': item['rsNewBlockListName'], 'SrcNetwork': item['rsNewBlockListSrcNetwork']} for item in bl_item]
-                banner()
-                print("DP: ",dp,". Blocklist rules starting with: <",policy_name,">")
-                #print(json.dumps(block_list, indent=2))
-                print(json.dumps(bl_list, indent=2),"\n",val_bl)
-                banner()
-            else:
-                print("\nBlock rule not in place")
     else:        
         if not (args.input):
             banner()
@@ -474,9 +580,9 @@ def main():
                 # STAGE 2 - validate subnet lists
                 validate_subnets(subnet_list, valid_subnets)
 
-                # STAGE 3 - generate cli commands for network class
+                # STAGE 3 - generate cli commands for network class                 
                 net_class  = gen_cli_class_cmd(valid_subnets,cli_class_cmd,network_name)
-            
+
                 # STAGE 4 - generate cli commands for blocklist policy
                 blk_policy = gen_cli_block_rule(cli_class_cmd,cli_blk_rule,policy_name)
                 
@@ -486,31 +592,19 @@ def main():
                     print("To see the progress open a 2nd terminal and run 'tail -f output.log'")
                     #print("\nDetails are located in ",output_log)
                     with open(output_log, 'w') as output_file:
-                        with redirect_stdout(output_file), redirect_stderr(output_file):                    
-                            for dp in cfg.DefensePro_MGMT_IP:
-                                if v.LockUnlockDP('lock',dp) != 200:
-                                    print("Unable to lock DP: ",dp)
-                                    continue
-                                block_list = v.getBlTbl(dp)
-                                bl_item = [item for item in block_list.get('rsNewBlockListTable',[]) if item.get('rsNewBlockListName').startswith(policy_name + "_") ]
-                                idx_bl_to_delete = [item['rsNewBlockListName'] for item in bl_item]
-                                val_bl = [item for item in idx_bl_to_delete if  policy_name + "_" in item]
-                                if val_bl:
-                                    banner()
-                                    print("DP: ",dp)
-                                    print("Blocklist rule(s) already in place. Please use -d to delete 1st.")
-                                    print(val_bl)
-                                    banner()
-                                    v.LockUnlockDP('unlock',dp)
-                                    continue
-                                else:
-                                    v.AddNetClass(net_class,dp)
-                                    v.AddBlkPolicy(blk_policy,dp)
-                                    v.UpdatePolicies(dp)
-                                    v.LockUnlockDP('unlock',dp)
+                        #with redirect_stdout(output_file), redirect_stderr(output_file):                    
+                        for dp in cfg.DefensePro_MGMT_IP:
+                            if v.LockUnlockDP('lock',dp) != 200:
+                                print("Unable to lock DP: ",dp)
+                                continue
+                            else:
+                                v.AddNetClass(net_class,dp)
+                                v.AddBlkPolicy(blk_policy,dp)
+                                v.UpdatePolicies(dp)
+                                v.LockUnlockDP('unlock',dp)
                     print("\nScript execution finished.\nDetails are located in ",output_log)
                 else:
                     print("Flag -p or --push is not present. Config is not pushed to device.")
-            
+
 if __name__ == '__main__':
     main()
