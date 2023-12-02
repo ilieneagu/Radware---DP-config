@@ -77,7 +77,7 @@ subnet_list = 'subnet_list.txt'  # stage 1 outpout file and stage 2 input file
 valid_subnets = 'valid_subnets.txt'  # stage 2 outpout file and stage 3 input file
 cli_class_cmd = 'cli_class_cmd.txt' # stage 3 outpout file and stage 4 input file
 cli_blk_rule = 'cli_blk_rule.txt' # stage 4 output file
-output_log = f'output_{timestamp}.log'
+output_log = 'output.log'
 chunk_size=8
 
 class Vision:
@@ -188,18 +188,6 @@ class Vision:
         print("return code",r.status_code,r.content)
         banner()
         
-    #replaced by getTable
-    # def getNetTbl(self,dp,search=None):
-    #     print("DP: ",dp,"- Get NetClasses...")
-    #     sig_list_url = self.base_url + self.byip_cfg_path + \
-    #                      f"/{dp}/config/rsBWMNetworkTable?props=rsBWMNetworkName,rsBWMNetworkSubIndex"
-    #     print(sig_list_url)
-    #     r = self.sess.get(url=sig_list_url, verify=False)
-    #     print("return code",r.status_code)
-        
-        banner()
-        return json.loads(r.content)
-    
     def delEntry(self,dp,table,name):
         # [ {"rsNewBlockListName": "block3_1", "rsNewBlockListSrcNetwork": "False_1"},
         # {"rsNewBlockListName": "block3_2", "rsNewBlockListSrcNetwork": "False_2"} ]
@@ -224,7 +212,7 @@ class Vision:
                 banner()
 
     #get blocklist or network class table
-    def getTable(self,dp,table="bl",search=None):
+    def getTable(self,dp,table,search=None):
         # function will return a dict for blocklist table="bl" or network class table="class"
         # dict key =  table name ; dict values = another dict with key = BL rule names and value = source network names
         # block list
@@ -260,12 +248,6 @@ class Vision:
         else:
             list_name = [item for item in list_items.get(tbl_dict,"[]") ]
             return list_name
-
-    def extract_list(self,list_items,table):
-        if table == "bl":
-            pass
-        else:
-            pass
 
     #CYBERCONTROLLER ONLY
     def delTable(self,dp,table,key_name):
@@ -469,6 +451,7 @@ def main():
     """
     parser = argparse.ArgumentParser(description = description,formatter_class=argparse.RawTextHelpFormatter)
     
+    parser.add_argument('-a', '--auto',action="store_true", help='Used for automation. No user prompt.')
     parser.add_argument('-i', '--input', type=str, help='Input file with list of networks.')
     parser.add_argument('-n', '--network', help='Name of the Network class. If not used it will have same name as blocklist.')
     parser.add_argument('-b', '--blocklist', type=str, help='Blocklist policy that STARTS with this name.')
@@ -490,10 +473,8 @@ def main():
     if args.showBL:
         for dp in cfg.DefensePro_MGMT_IP:
             if args.blocklist:
-                #print("bl")
                 result=v.getTable(dp,"bl",policy_name)
             else:
-                print("no bl")
                 result=v.getTable(dp,"bl")
             if (result):
                 if policy_name:
@@ -525,17 +506,22 @@ def main():
                     print("Unable to lock DP: ",dp)
                     continue
                 result=v.getTable(dp,"bl",policy_name)
-                if result:
-                    print(json.dumps(result,indent=2))
-                else:
+                if not result:
                     print("DP:",dp,"Blocklist rules starting with: <",policy_name,"> - not in place.")
-                if result: #and question("delete ?"):
-                    with open(output_log, 'w') as output_file:
-                        #with redirect_stdout(output_file), redirect_stderr(output_file):
-                        v.delEntry(dp,result,"bl")
-                        v.UpdatePolicies(dp)
-                        v.LockUnlockDP('unlock',dp)
-                    print("\nScript execution finished.\nDetails are located in ",output_log)    
+                else:
+                    print(json.dumps(result,indent=2))
+                    if args.auto:
+                            v.delEntry(dp,result,"bl")
+                            v.UpdatePolicies(dp)
+                            v.LockUnlockDP('unlock',dp)
+                            print("\nScript execution finished.\n")
+                    elif question("Delete ???"):
+                        with open(output_log, 'w') as output_file:
+                            with redirect_stdout(output_file), redirect_stderr(output_file):
+                                v.delEntry(dp,result,"bl")
+                                v.UpdatePolicies(dp)
+                                v.LockUnlockDP('unlock',dp)
+                        print("\nScript execution finished.\nDetails are located in ",output_log)
     elif args.delNet:
         print("Flag -dnet is present. Deleting Network class(es)...")
         if args.network is  None:
@@ -545,18 +531,23 @@ def main():
                 if v.LockUnlockDP('lock',dp) != 200:
                     print("Unable to lock DP: ",dp)
                     continue
-            result=v.getTable(dp,"class",network_name)
-            if (result):
-                print(json.dumps(result,indent=2))
-            else:
-                print("DP:",dp,"Network classes starting with: <",network_name,"> - not in place.")
-            if result: # and question("delete ?"):
-                with open(output_log, 'w') as output_file:
-                    #with redirect_stdout(output_file), redirect_stderr(output_file):
-                    v.delEntry(dp,result,"class")
-                    v.UpdatePolicies(dp)
-                    v.LockUnlockDP('unlock',dp)
-                print("\nScript execution finished.\nDetails are located in ",output_log)
+                result=v.getTable(dp,"class",network_name)
+                if not (result):
+                    print("DP:",dp,"Network classes starting with: <",network_name,"> - not in place.")
+                else:
+                    print(json.dumps(result,indent=2))
+                    if args.auto:
+                            v.delEntry(dp,result,"class")
+                            v.UpdatePolicies(dp)
+                            v.LockUnlockDP('unlock',dp)
+                            print("\nScript execution finished.\n")
+                    elif question("Delete???"):
+                        with open(output_log, 'w') as output_file:
+                            with redirect_stdout(output_file), redirect_stderr(output_file):
+                                v.delEntry(dp,result,"class")
+                                v.UpdatePolicies(dp)
+                                v.LockUnlockDP('unlock',dp)
+                            print("\nScript execution finished.\nDetails are located in ",output_log)
     elif not (args.blocklist):
         parser.print_help()
         banner()
