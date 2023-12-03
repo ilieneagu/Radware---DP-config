@@ -201,7 +201,6 @@ class Vision:
                 banner()
         elif "class":
             # {'rsBWMNetworkName': 'any', 'rsBWMNetworkSubIndex': '0'}
-
             # ex: net_id = [mylist_3/1,mylist_3/2]
             net_id = [(item['rsBWMNetworkName'] + "/" + item['rsBWMNetworkSubIndex']) for item in table]
             for net in net_id:
