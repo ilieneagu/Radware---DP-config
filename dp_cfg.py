@@ -71,6 +71,10 @@ import config as cfg
 import socket
 import json
 from contextlib import redirect_stdout, redirect_stderr
+import urllib3
+
+urllib3.disable_warnings()
+
 
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 subnet_list = 'subnet_list.txt'  # stage 1 outpout file and stage 2 input file 
