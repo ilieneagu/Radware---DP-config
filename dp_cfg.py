@@ -70,13 +70,14 @@ import requests
 import config as cfg
 import socket
 import json
+import datetime
 
 
 subnet_list = 'subnet_list.txt'  # stage 1 outpout file and stage 2 input file 
 valid_subnets = 'valid_subnets.txt'  # stage 2 outpout file and stage 3 input file
-cli_class_cmd = 'cli_class_cmd.txt' # stage 3 outpout file and stage 4 input file
-cli_blk_rule = 'cli_blk_rule.txt' # stage 4 output file
-chunk_size=8
+#cli_class_cmd = 'cli_class_cmd.txt' # stage 3 outpout file and stage 4 input file
+#cli_blk_rule = 'cli_blk_rule.txt' # stage 4 output file
+chunk_size = 10
 
 class Vision:
 
@@ -140,7 +141,7 @@ class Vision:
             print("Class name and index:",net_name)
             print("JSON payload:" , json_data)        
             r = self.sess.post(url=send_url, json=json_data, verify=False)
-            print("return code",r.status_code,r._content)
+            print(self.sess.post.__name__ ,"=>return code",r.status_code,r._content)
             banner("-")
         banner()
 
@@ -156,7 +157,7 @@ class Vision:
             send_url = self.base_url + self.DPBlkPol_path + policy_name
             print("URL:",send_url)
             r = self.sess.post(url=send_url, json=json_data, verify=False)
-            print("return code",r.status_code,r._content)
+            print(self.sess.post.__name__  ,"=>return code",r.status_code,r._content)
             banner("-")
         banner()
 
@@ -220,14 +221,16 @@ class Vision:
         print(sig_list_url)
         r = self.sess.get(url=sig_list_url, verify=False)
         list_items = json.loads(r.content)
-        print("return code",r.status_code)
+        print(self.sess.get.__name__ ,"=>return code",r.status_code)
         banner()
         if search:
             list_name = [item for item in list_items.get(tbl_dict,"[]") \
                             if item[tbl_item].startswith(search)]
+            print([item[tbl_item] for item in list_name])
             return list_name
         else:
             list_name = [item for item in list_items.get(tbl_dict,"[]") ]
+            print([item[tbl_item] for item in list_name])
             return list_name
      
 
@@ -235,20 +238,10 @@ class Vision:
 def banner(char="="):
     print(char * 80)
 
-def extract_values_from_dict(input_dict):
-    extracted_dict = {}
-
-    for key, value in input_dict.items():
-        # Split the value string into individual components
-        components = value.split(',')
-
-        # Create a new dictionary from the components
-        extracted_values = {item.split(':')[0]: item.split(':')[1] for item in components}
-
-        # Add the new dictionary to the extracted_dict using the original key
-        extracted_dict[key] = extracted_values
-
-    return extracted_dict
+def custom_sort(item):
+    # Extract the number part after the underscore and convert it to an integer
+    # Ex: 'rere_1','rere_2','rere_3'
+    return int(item.rsplit('_',1)[1])
 
 # STAGE 1
 def remove_duplicates(input_file_path, output_file_path):
@@ -322,76 +315,80 @@ def validate_subnets(input_file, output_file):
     print(f"Stage2: processed {count} lines. Valid subnets saved to {output_file}.")
     banner()
 
-
 # STAGE3
-def gen_cli_class_cmd(input_file_path, output_file_path,class_name,chunk=chunk_size):
+def gen_class_api(input_file_path,class_name,chunk=chunk_size):
     """
     Process a text file with IP subnets,
-    split the lines into chunks, and write the output to a text file.
+    split the lines into chunks based on chunk size
 
     Parameters:
     - input_file_path (str): Path to the input file.
-    - output_file_path (str): Path to the output text file.
+    - network class dict
     - chunk_size (int): Number of lines to include in each chunk.
     Default is 250.
-    User is asked to enter class_name and an index (X) is added for each 250 subnets
-    blk_list_1
-    blk_list_2
-    output: classes modify network add 'class_name_X' 'row_number' -a 'ip_subnet' -s 'ip_mask'
+
     """
     net_class_api={}
     key=""
-    print("Stage3: generate network class commands")
     with open(input_file_path, 'r') as input_file:
         lines = input_file.readlines()
-        with open(output_file_path, 'w') as output_file:
-            for i in range(0, len(lines), chunk):
-                for j, line in enumerate(lines[i:i+chunk], 1):
-                    split_lines = line.split('/')
-                    output_file.write(f'classes modify network add {class_name}_{i//chunk + 1} {j} -a {split_lines[0]} -s {split_lines[1]}')  
-                    key = f'{class_name}_{i//chunk + 1}/{j}'
-                    value = f'rsBWMNetworkAddress:{split_lines[0]},rsBWMNetworkMask:{split_lines[1].strip()}' 
-                    net_class_api.update({key:value})
-                    if (j == 1 and i == 0 ) : print("Network class and index:",key,"\n...") 
-                print("Network class and index:",key)
-    print(f"Output file '{output_file_path}' has been created.\nIt contains network classes to be added.")
-    banner()
-    return extract_values_from_dict(net_class_api)
+        for i in range(0, len(lines), chunk):
+            for j, line in enumerate(lines[i:i+chunk], 1):
+                split_lines = line.split('/')
+                key = f'{class_name}_{i//chunk + 1}/{j}'
+                value = {f'rsBWMNetworkAddress':f'{split_lines[0]}','rsBWMNetworkMask':f'{split_lines[1].strip()}'}
+                net_class_api.update({key:value})
+    # return a dictionnary with network classes
+    # {'net_1':'rsBWMNetworkAddress': '18.51.154.216', 'rsBWMNetworkMask': '32'})
+    return (net_class_api)
 
 # STAGE4
-def gen_cli_block_rule(input_file,output_file,policy_name):
+def gen_bl_api(net_class,policy_name):
     """
     Generate block list rule
     Parameters:
-    - input_file_path (str): cli class definition
-    - output_file_path (str): 1 block list rule per network class 
-    block list rule has 
-    src: network class
-    dst: any 
-    direction: one way
-    ports: any
-    protocol: any
-    """
+    - network class dict
+    - policy name for the blocklist rule
+    The rull will have default settings: 
+        src: network class
+        dst: any 
+        direction: one way
+        ports: any
+        protocol: any
+    """  
+    #  input is network class dict
+    # {'net_1':'rsBWMNetworkAddress': '18.51.154.216', 'rsBWMNetworkMask': '32'})
     policy_api={}
-    #payload = "rsNewBlockListSrcNetwork:n6,rsNewBlockListDstNetwork:any,rsNewBlockListAction:1"
-    print("Stage4: generate block list policy rules")
-    blk_id = set()
-    with open(input_file, 'r') as file:
-        for line in file:
-            columns = line.split()
-            blk_id.add(columns[4])
-            #print(sorted(blk_id))
-        # Convert the set to a sorted list
-        sorted_blk = sorted(blk_id)
-        with open(output_file, 'w') as output:
-            for bk in sorted_blk:
-                name = policy_name+ bk[-2:]
-                print('Policy:',name)
-                output.write(f'dp block-allow-lists blocklist table create {name} -sn {bk} -dn any_ipv4 -a drop\n')
-                policy_api.update({name:f'rsNewBlockListSrcNetwork:{bk},rsNewBlockListDstNetwork:any'})
-    print(f"Output file '{output_file}' has been created.\nIt contains blocklist policies to be added.")
-    banner()
-    return extract_values_from_dict(policy_api)
+    src_net = set()
+    
+    # extract net-class names from net class dictionnary
+    class_name = set([k for k in net_class.keys()])
+
+    # extract source net from class_name set (remove /1,/2,etc)
+    # add it to source network set and thus no duplicates
+    for item in class_name:
+        data=item.split("/")
+        src_net.add(data[0])
+
+    # sort source network by number after rightmost "_" 
+    # see function "custom sort"
+    # net_1,net_2 etc
+    src_net_sort = sorted(src_net,key=custom_sort)
+
+    # create policy name from source net name
+    # from src_1,src_2,etc
+    # to policy name : policyname_1,_2 etc
+    for item in (src_net_sort):
+        data2=item.rsplit("_",1) # extract suffix _1,_2 etc
+        pol_name =policy_name+"_" + data2[1] # add suffix to policy name
+        #build json payload
+        r={f'{pol_name}':{f'rsNewBlockListSrcNetwork': f'{item}', f'rsNewBlockListDstNetwork': 'any'}}
+        policy_api.update(r)    
+    # return a dict 
+    # key = policy name
+    # value = JSON payload to add the BL rule
+    # {'policy-name_1': {'rsNewBlockListSrcNetwork': 'net2_1', 'rsNewBlockListDstNetwork': 'any'}}
+    return(policy_api)
 
 
 def main():
@@ -427,7 +424,7 @@ def main():
                 print("Unable to lock DP: ",dp)
                 continue
             result=v.getTable(dp,"bl",policy_name)
-            print(json.dumps(result,indent=2))
+            #print(json.dumps(result,indent=2))
             v.delEntry(dp,result,"bl")
             v.UpdatePolicies(dp)
             v.LockUnlockDP('unlock',dp)
@@ -439,7 +436,7 @@ def main():
                 print("Unable to lock DP: ",dp)
                 continue
             result=v.getTable(dp,"class",network_name)
-            print(json.dumps(result,indent=2))
+            #print(json.dumps(result,indent=2))
             v.delEntry(dp,result,"class")
             v.UpdatePolicies(dp)
             v.LockUnlockDP('unlock',dp)
@@ -457,10 +454,10 @@ def main():
         validate_subnets(subnet_list, valid_subnets)
 
         # STAGE 3 - generate cli commands for network class                 
-        net_class  = gen_cli_class_cmd(valid_subnets,cli_class_cmd,network_name)
+        net_class  = gen_class_api(valid_subnets,network_name)
 
         # STAGE 4 - generate cli commands for blocklist policy
-        blk_policy = gen_cli_block_rule(cli_class_cmd,cli_blk_rule,policy_name)
+        blk_policy = gen_bl_api(net_class,policy_name)
         
         if args.push:
             print("Flag -p or --push is present. Sending config to Vision...")
@@ -477,6 +474,9 @@ def main():
             print("\nScript execution finished.\n")
         else:
             print("Flag -p or --push is not present. Config is not pushed to device.")
-
+            
+    end_time = datetime.datetime.now()
+    formatted_time = end_time.strftime("%Y-%m-%d %H:%M:%S")
+    print("Script completed at:", formatted_time)
 if __name__ == '__main__':
     main()
