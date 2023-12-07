@@ -71,13 +71,13 @@ import config as cfg
 import socket
 import json
 import datetime
-
+import re
 
 subnet_list = 'subnet_list.txt'  # stage 1 outpout file and stage 2 input file 
 valid_subnets = 'valid_subnets.txt'  # stage 2 outpout file and stage 3 input file
 #cli_class_cmd = 'cli_class_cmd.txt' # stage 3 outpout file and stage 4 input file
 #cli_blk_rule = 'cli_blk_rule.txt' # stage 4 output file
-chunk_size = 10
+chunk_size = 3
 
 class Vision:
 
@@ -194,7 +194,7 @@ class Vision:
                 banner()
 
     #get blocklist or network class table
-    def getTable(self,dp,table,search=None):
+    def getTable(self,dp,table,pol_name):
         # function will return a dict for blocklist table="bl" or network class table="class"
         # dict key =  table name ; dict values = another dict with key = BL rule names and value = source network names
         # block list
@@ -221,22 +221,36 @@ class Vision:
         print(sig_list_url)
         r = self.sess.get(url=sig_list_url, verify=False)
         list_items = json.loads(r.content)
+        print(list_items)
         print(self.sess.get.__name__ ,"=>return code",r.status_code)
         banner()
-        if search:
-            list_name = [item for item in list_items.get(tbl_dict,"[]") \
-                            if item[tbl_item].startswith(search)]
-            print([item[tbl_item] for item in list_name])
-            return list_name
+        list_name = [item for item in list_items.get(tbl_dict,"[]") \
+                        if find_value(item[tbl_item],pol_name)]
+        if len(list_name) :
+           return list_name
         else:
-            list_name = [item for item in list_items.get(tbl_dict,"[]") ]
-            print([item[tbl_item] for item in list_name])
-            return list_name
-     
+            return 0
 
 
 def banner(char="="):
     print(char * 80)
+
+def extract_suffix(name):
+    # Define a regular expression pattern to return "_xxx" at the end of a string
+    # xxx = numbers
+    pattern = re.compile(r'(\w+)(_\d+$)')
+    return pattern.search(name).group(2)
+
+def find_value(find_txt,value):
+    # Define a regular expression pattern
+    #  to match policy name that starts with "value" and 
+    #  has "_xxx" at the end of a string
+    #  xxx = numbers
+    pattern = r'^'+ value + r'(_\d+$)'
+    matches= re.search(pattern,find_txt)
+    if matches:
+            #print(matches)
+            return True
 
 def custom_sort(item):
     # Extract the number part after the underscore and convert it to an integer
@@ -379,8 +393,7 @@ def gen_bl_api(net_class,policy_name):
     # from src_1,src_2,etc
     # to policy name : policyname_1,_2 etc
     for item in (src_net_sort):
-        data2=item.rsplit("_",1) # extract suffix _1,_2 etc
-        pol_name =policy_name+"_" + data2[1] # add suffix to policy name
+        pol_name =policy_name+ extract_suffix(item) # add suffix to policy name
         #build json payload
         r={f'{pol_name}':{f'rsNewBlockListSrcNetwork': f'{item}', f'rsNewBlockListDstNetwork': 'any'}}
         policy_api.update(r)    
@@ -402,7 +415,7 @@ def main():
     parser = argparse.ArgumentParser(description = description,formatter_class=argparse.RawTextHelpFormatter)
     
     parser.add_argument('-i', '--input', type=str, help='Input file with list of networks.')
-    parser.add_argument('-n', '--network', help='Name of the Network class. If not used it will have same name as blocklist.')
+    parser.add_argument('-n', '--network', help='Name of the Network class. If not used, it will have same name as blocklist.')
     parser.add_argument('-b', '--blocklist', type=str, help='Blocklist policy that STARTS with this name.')
     parser.add_argument('-p', '--push', action="store_true", help='Push config to device and update policy.Requires -i and -b.')
     parser.add_argument('-dbl', '--delBL', action="store_true", help='Delete Blocklist rule starting with a value. Requires -b')
@@ -414,39 +427,57 @@ def main():
     input_file = args.input
     policy_name = args.blocklist
     network_name = args.network if args.network else args.blocklist
-    
-    v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
-    
+
     if args.delBL:
+        if not policy_name:
+            print("Missing blocklist policy name")
+            exit(1)
+        v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
         print("Flag -dbl is present. Deleting BL rule...")
         for dp in cfg.DefensePro_MGMT_IP:
             if v.LockUnlockDP('lock',dp) != 200:
                 print("Unable to lock DP: ",dp)
                 continue
-            result=v.getTable(dp,"bl",policy_name)
-            #print(json.dumps(result,indent=2))
-            v.delEntry(dp,result,"bl")
-            v.UpdatePolicies(dp)
-            v.LockUnlockDP('unlock',dp)
-            print("\nScript execution finished.\n")
+            else:
+                result=v.getTable(dp,"bl",policy_name)
+                #print(json.dumps(result,indent=2))
+                if result:
+                    v.delEntry(dp,result,"bl")
+                    v.UpdatePolicies(dp)
+                else:
+                    print("Blocklist policy:", policy_name,"_xxx not found.")
+                    banner()
+                v.LockUnlockDP('unlock',dp)
+        print("\nScript execution finished.\n")
     elif args.delNet:
         print("Flag -dnet is present. Deleting Network class(es)...")
+        if not policy_name:
+            print("Missing class policy name")
+            exit(1)
+        v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
         for dp in cfg.DefensePro_MGMT_IP:
             if v.LockUnlockDP('lock',dp) != 200:
                 print("Unable to lock DP: ",dp)
                 continue
-            result=v.getTable(dp,"class",network_name)
-            #print(json.dumps(result,indent=2))
-            v.delEntry(dp,result,"class")
-            v.UpdatePolicies(dp)
-            v.LockUnlockDP('unlock',dp)
-            print("\nScript execution finished.\n")
+            else:
+                result=v.getTable(dp,"class",network_name)
+                if result:
+                    v.delEntry(dp,result,"class")
+                    v.UpdatePolicies(dp)
+                else:
+                    print("Network class:",policy_name,"_xxx not found.")
+                    banner()
+                v.LockUnlockDP('unlock',dp)
+        print("\nScript execution finished.\n")
     else:
         print(f'Input file: {input_file}')
         print(f'Network class name : {network_name}')
         print(f'Policy name: {policy_name}')    
         banner()
-
+        if not policy_name:
+            print("Missing blocklist policy name")
+            exit(1)
+        v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
         # STAGE 1 - clean file, remove duplicates
         remove_duplicates(input_file, subnet_list)
 
