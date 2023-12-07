@@ -72,6 +72,7 @@ import socket
 import json
 from contextlib import redirect_stdout, redirect_stderr
 import urllib3
+import re
 
 urllib3.disable_warnings()
 
@@ -82,7 +83,7 @@ valid_subnets = 'valid_subnets.txt'  # stage 2 outpout file and stage 3 input fi
 cli_class_cmd = 'cli_class_cmd.txt' # stage 3 outpout file and stage 4 input file
 cli_blk_rule = 'cli_blk_rule.txt' # stage 4 output file
 output_log = 'output.log'
-chunk_size=8
+chunk_size=3
 
 class Vision:
 
@@ -266,6 +267,12 @@ class Vision:
         print("return code",r.status_code,r.content)
         banner()        
 
+def extract_suffix(name):
+    # Define a regular expression pattern to match "_xxx" at the end of a string
+    # xxx = numbers
+    pattern = re.compile(r'_\d+$')
+    return pattern.search(name).group(0)
+
 def question(question):
     # Example usage
     # user_agrees = ask_yes_no_question("Do you want to proceed?")
@@ -435,7 +442,7 @@ def gen_cli_block_rule(input_file,output_file,policy_name):
         sorted_blk = sorted(blk_id)
         with open(output_file, 'w') as output:
             for bk in sorted_blk:
-                name = policy_name+ bk[-2:]
+                name = policy_name+ extract_suffix(bk)
                 print('Policy:',name)
                 output.write(f'dp block-allow-lists blocklist table create {name} -sn {bk} -dn any_ipv4 -a drop\n')
                 policy_api.update({name:f'rsNewBlockListSrcNetwork:{bk},rsNewBlockListDstNetwork:any'})
