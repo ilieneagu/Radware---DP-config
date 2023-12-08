@@ -62,7 +62,7 @@ subnet_list = 'subnet_list.txt'  # stage 1 outpout file and stage 2 input file
 valid_subnets = 'valid_subnets.txt'  # stage 2 outpout file and stage 3 input file
 #cli_class_cmd = 'cli_class_cmd.txt' # stage 3 outpout file and stage 4 input file
 #cli_blk_rule = 'cli_blk_rule.txt' # stage 4 output file
-chunk_size = 30
+chunk_size = 250
 
 urllib3.disable_warnings()
 
@@ -239,7 +239,7 @@ def find_value(find_txt,value):
     #  has "_xxx" at the end of a string
     #  xxx = numbers
     pattern = r'^'+ value + r'(_\d+$)'
-    matches= re.search(pattern,find_txt)
+    matches= re.search(pattern,find_txt,re.IGNORECASE)
     if matches:
             #print(matches)
             return True
@@ -305,12 +305,16 @@ def validate_subnets(input_file, output_file):
             subnet = line.strip()  # Remove leading and trailing whitespaces
             count +=1
             if '/' in subnet:
+                ip_address, subnet_mask = subnet.split('/')
                 try:
-                     outfile.write(f"{subnet}\n")
+                    ipaddress.IPv4Address(ip_address)
+                    ipaddress.IPv4Network(f"{ip_address}/{subnet_mask}", strict=True)
+                    outfile.write(f"{subnet}\n")
                 except (ipaddress.AddressValueError, ipaddress.NetmaskValueError, ValueError):
                     print(f"{input_file} has an invalid subnet (line {line_number}): {subnet}")
             else:
                 try:
+                    ipaddress.IPv4Address(subnet)
                     outfile.write(f"{subnet}/32\n")
                 except ipaddress.AddressValueError:
                     print(f"{input_file} has invalid host (line {line_number}): {subnet}")
