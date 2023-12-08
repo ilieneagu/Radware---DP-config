@@ -152,4 +152,4 @@ cython_debug/
 #.idea/
 
 #do not push to GitHub
-config.py
+#config.py
