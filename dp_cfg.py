@@ -15,12 +15,9 @@ This program has for stages:
 Stages:
 1) remove_duplicates - clean the data source for leading/trailling spaces and remove duplicate lines
 2) validate_subnet - validates each subnet from the list
-3) generate cli command for network classes from valid subnet list
-4) generate cli command for block list rules from the newwork classes created in step 3
-5) if -p flag is used config is sent to DP
+3) Returns a dictionnary with network classes from valid subnet list
+4) Returns a dictionnary with block list rules from network classes created in step 3
 
--dnet : deletes network classes
--dbl : deletes blocklist rule
 
 Program uses following arguments:
 
@@ -38,29 +35,16 @@ The script will append _1, _2, etc., for each blocklist rule created. Blocklist 
     Destination network: any
     Protocol: any
     Port: any
-Example command: python de_cfg.py -i input_file.txt -n network_class_name -b blocklist_name
-
-Save CLI Commands to Files
-
-The above 3 arguments are ****mandatory**** ; the script will save the CLI commands into two files:
-
-cli_class_cmd.txt - network class commands (example):
-    classes modify network add net_1 1 -a 1.51.154.21 -s 32
-    classes modify network add net_1 2 -a 198.51.154.2 -s 32
-    ...
-    classes modify network add net_1 250 -a 19.1.14.0 -s 24
-
-cli_blk_rule.txt - block list rule to create (example):
-    dp block-allow-lists blocklist table create b1_1 -sn net1_1 -dn any_ipv4 -a drop
-
-Push Configuration to DP (Optional)
-
-If you also use the -p or --push argument,
-the configuration will be pushed to DefensePro with Vision API calls.
-Details of Vision commands will be saved to output.log.
-
 Example command:
-python dp_cfg.py -i input_file.txt -n network_class_name -b blocklist_name -p
+    python de_cfg.py -i input_file.txt -n network_class_name -b blocklist_name
+
+if -p flag is used config is sent to DP
+
+Other arguments:
+-dnet : deletes network classes
+    (requires -n or -b if both network class and blocklist rule have same suffix)
+-dbl : deletes blocklist rule (requires -n)
+
 """
 
 import ipaddress
@@ -72,12 +56,16 @@ import socket
 import json
 import datetime
 import re
+import urllib3
 
 subnet_list = 'subnet_list.txt'  # stage 1 outpout file and stage 2 input file 
 valid_subnets = 'valid_subnets.txt'  # stage 2 outpout file and stage 3 input file
 #cli_class_cmd = 'cli_class_cmd.txt' # stage 3 outpout file and stage 4 input file
 #cli_blk_rule = 'cli_blk_rule.txt' # stage 4 output file
-chunk_size = 3
+chunk_size = 30
+
+urllib3.disable_warnings()
+
 
 class Vision:
 
@@ -221,7 +209,7 @@ class Vision:
         print(sig_list_url)
         r = self.sess.get(url=sig_list_url, verify=False)
         list_items = json.loads(r.content)
-        print(list_items)
+        print("FULL ",tbl_dict,"TABLE:\n",list_items)
         print(self.sess.get.__name__ ,"=>return code",r.status_code)
         banner()
         list_name = [item for item in list_items.get(tbl_dict,"[]") \
@@ -233,7 +221,11 @@ class Vision:
 
 
 def banner(char="="):
-    print(char * 80)
+    print(char * 100)
+
+def get_time():
+    end_time = datetime.datetime.now()
+    return end_time.strftime("%Y-%m-%d %H:%M:%S")
 
 def extract_suffix(name):
     # Define a regular expression pattern to return "_xxx" at the end of a string
@@ -313,16 +305,12 @@ def validate_subnets(input_file, output_file):
             subnet = line.strip()  # Remove leading and trailing whitespaces
             count +=1
             if '/' in subnet:
-                ip_address, subnet_mask = subnet.split('/')
                 try:
-                    ip = ipaddress.IPv4Address(ip_address)
-                    net = ipaddress.IPv4Network(f"{ip_address}/{subnet_mask}", strict=True)
-                    outfile.write(f"{subnet}\n")
+                     outfile.write(f"{subnet}\n")
                 except (ipaddress.AddressValueError, ipaddress.NetmaskValueError, ValueError):
                     print(f"{input_file} has an invalid subnet (line {line_number}): {subnet}")
             else:
                 try:
-                    ip = ipaddress.IPv4Address(subnet)
                     outfile.write(f"{subnet}/32\n")
                 except ipaddress.AddressValueError:
                     print(f"{input_file} has invalid host (line {line_number}): {subnet}")
@@ -334,6 +322,7 @@ def gen_class_api(input_file_path,class_name,chunk=chunk_size):
     """
     Process a text file with IP subnets,
     split the lines into chunks based on chunk size
+    Returns a dictionnary with network classes
 
     Parameters:
     - input_file_path (str): Path to the input file.
@@ -352,18 +341,18 @@ def gen_class_api(input_file_path,class_name,chunk=chunk_size):
                 key = f'{class_name}_{i//chunk + 1}/{j}'
                 value = {f'rsBWMNetworkAddress':f'{split_lines[0]}','rsBWMNetworkMask':f'{split_lines[1].strip()}'}
                 net_class_api.update({key:value})
-    # return a dictionnary with network classes
+    # returns a dictionnary with network classes
     # {'net_1':'rsBWMNetworkAddress': '18.51.154.216', 'rsBWMNetworkMask': '32'})
     return (net_class_api)
 
 # STAGE4
 def gen_bl_api(net_class,policy_name):
     """
-    Generate block list rule
+    Return a dictionnary with BL rule
     Parameters:
     - network class dict
     - policy name for the blocklist rule
-    The rull will have default settings: 
+    The rule will have default settings: 
         src: network class
         dst: any 
         direction: one way
@@ -405,12 +394,29 @@ def gen_bl_api(net_class,policy_name):
 
 
 def main():
-
+    print("Script started at:", get_time())
     description = """
-    From an input tile with a list of subnets we generate cli
-    commands to create Network Class and Blocklist rule on DP.
+    From an input file with a list of subnets, the script
+    creates Network Class(es) and Blocklist rule(s) on DP
+    using Vision API.
     Use "-p or (--push)" option to send the commands to the DP.
-    (and update policies)
+    Use -dbl to delete block list policy ; requires -b
+        Policy name FORMAT: "policy-name_xx" (xx - numbers)
+    Use -dnet to delete network class ; requires -n (or -b)
+        Network class FORMAT: "network-name_xx" (xx - numbers)
+    
+    example: python dp_cfg.py  -b pk_bl   -dbl
+        delete all blocklist policies with name 
+        pk_bl_1,pk_bl_2,pk_bl_3,etc
+    
+    example: 
+    python dp_cfg.py  -b pk_bl   -dnet
+    or
+    python dp_cfg.py  -n pk_bl   -dnet
+        delete all network classes with name 
+        pk_bl_1,pk_bl_2,pk_bl_3,etc
+    
+    see arguments below
     """
     parser = argparse.ArgumentParser(description = description,formatter_class=argparse.RawTextHelpFormatter)
     
@@ -440,19 +446,19 @@ def main():
                 continue
             else:
                 result=v.getTable(dp,"bl",policy_name)
-                #print(json.dumps(result,indent=2))
                 if result:
+                    print("item to delete\n:",json.dumps(result,indent=1))
                     v.delEntry(dp,result,"bl")
                     v.UpdatePolicies(dp)
                 else:
-                    print("Blocklist policy:", policy_name,"_xxx not found.")
+                    print("Blocklist policy:"+ policy_name +"_xxx not found.")
                     banner()
                 v.LockUnlockDP('unlock',dp)
         print("\nScript execution finished.\n")
     elif args.delNet:
         print("Flag -dnet is present. Deleting Network class(es)...")
-        if not policy_name:
-            print("Missing class policy name")
+        if not network_name:
+            print("Missing network class name")
             exit(1)
         v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
         for dp in cfg.DefensePro_MGMT_IP:
@@ -462,10 +468,11 @@ def main():
             else:
                 result=v.getTable(dp,"class",network_name)
                 if result:
+                    print("item to delete\n:",json.dumps(result,indent=1))
                     v.delEntry(dp,result,"class")
                     v.UpdatePolicies(dp)
                 else:
-                    print("Network class:",policy_name,"_xxx not found.")
+                    print("Network class:" + network_name + "_xxx not found.")
                     banner()
                 v.LockUnlockDP('unlock',dp)
         print("\nScript execution finished.\n")
@@ -484,10 +491,10 @@ def main():
         # STAGE 2 - validate subnet lists
         validate_subnets(subnet_list, valid_subnets)
 
-        # STAGE 3 - generate cli commands for network class                 
+        # STAGE 3 - generate network class dict
         net_class  = gen_class_api(valid_subnets,network_name)
 
-        # STAGE 4 - generate cli commands for blocklist policy
+        # STAGE 4 - blocklist policy dict
         blk_policy = gen_bl_api(net_class,policy_name)
         
         if args.push:
@@ -506,8 +513,6 @@ def main():
         else:
             print("Flag -p or --push is not present. Config is not pushed to device.")
             
-    end_time = datetime.datetime.now()
-    formatted_time = end_time.strftime("%Y-%m-%d %H:%M:%S")
-    print("Script completed at:", formatted_time)
+    print("Script completed at:", get_time())
 if __name__ == '__main__':
     main()
