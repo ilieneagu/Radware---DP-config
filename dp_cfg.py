@@ -30,7 +30,10 @@ The script will append _1, _2, etc., for each network class created.
 Each class will have a maximum of 250 subnets.
 
 -b or --blocklist: Name of the blocklist to create.
-The script will append _1, _2, etc., for each blocklist rule created. Blocklist rule will be configured with default settings:
+If "-n" is not used network classes will have same prefix as blocklist rule
+
+The script will append _1, _2, etc., for each blocklist rule created.
+Blocklist rule will be configured with default settings:
     Source network: from the script
     Destination network: any
     Protocol: any
@@ -38,12 +41,15 @@ The script will append _1, _2, etc., for each blocklist rule created. Blocklist 
 Example command:
     python de_cfg.py -i input_file.txt -n network_class_name -b blocklist_name
 
-if -p flag is used config is sent to DP
+if -p flag is used the config will be sent to DP
 
 Other arguments:
--dnet : deletes network classes
-    (requires -n or -b if both network class and blocklist rule have same suffix)
--dbl : deletes blocklist rule (requires -n)
+-dnet "name" : deletes network classes stating whith "name"
+    (name_1, name_2,etc)
+    (requires -n)
+-dbl "name" : deletes blocklist rule and network classes stating whith "name"
+    (name_1, name_2,etc)
+    (requires -b)
 
 """
 
@@ -182,7 +188,7 @@ class Vision:
                 banner()
 
     #get blocklist or network class table
-    def getTable(self,dp,table,pol_name):
+    def getTable(self,dp,table,pol_name,show_full_table=0):
         # function will return a dict for blocklist table="bl" or network class table="class"
         # dict key =  table name ; dict values = another dict with key = BL rule names and value = source network names
         # block list
@@ -208,10 +214,15 @@ class Vision:
             exit(1)    
         print(sig_list_url)
         r = self.sess.get(url=sig_list_url, verify=False)
-        list_items = json.loads(r.content)
-        print("FULL ",tbl_dict,"TABLE:\n",list_items)
         print(self.sess.get.__name__ ,"=>return code",r.status_code)
-        banner()
+        list_items = json.loads(r.content)
+        if show_full_table:
+            banner("*")
+            print("FULL ",tbl_dict,"TABLE:\n",list_items)
+            banner("*")
+       
+        #
+        # banner()
         list_name = [item for item in list_items.get(tbl_dict,"[]") \
                         if find_value(item[tbl_item],pol_name)]
         if len(list_name) :
@@ -404,21 +415,24 @@ def main():
     creates Network Class(es) and Blocklist rule(s) on DP
     using Vision API.
     Use "-p or (--push)" option to send the commands to the DP.
+
     Use -dbl to delete block list policy ; requires -b
         Policy name FORMAT: "policy-name_xx" (xx - numbers)
-    Use -dnet to delete network class ; requires -n (or -b)
+    THIS OPTION WILL ALSO DELETE NETWORK CLASSES WITH THE SAME PREFIX !
+
+    Use -dnet to delete speific network classes ; requires -n
         Network class FORMAT: "network-name_xx" (xx - numbers)
     
     example: python dp_cfg.py  -b pk_bl   -dbl
-        delete all blocklist policies with name 
-        pk_bl_1,pk_bl_2,pk_bl_3,etc
+        delete all blocklist policies
+        and network classes with 
+        prefix PK_BL (case insensitive)
+            pk_bl_1,pk_bl_2,pk_bl_3,etc
     
     example: 
-    python dp_cfg.py  -b pk_bl   -dnet
-    or
-    python dp_cfg.py  -n pk_bl   -dnet
+    python dp_cfg.py  -n pk  -dnet
         delete all network classes with name 
-        pk_bl_1,pk_bl_2,pk_bl_3,etc
+        pk_1,pk_2,pk_3,etc
     
     see arguments below
     """
@@ -443,20 +457,32 @@ def main():
             print("Missing blocklist policy name")
             exit(1)
         v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
-        print("Flag -dbl is present. Deleting BL rule...")
+        print("Flag -dbl is present. Flag -dnet is ignored...")
         for dp in cfg.DefensePro_MGMT_IP:
             if v.LockUnlockDP('lock',dp) != 200:
                 print("Unable to lock DP: ",dp)
                 continue
             else:
-                result=v.getTable(dp,"bl",policy_name)
+                result=v.getTable(dp,"bl",policy_name,0)
                 if result:
+                    print("Deleting Blocklist and Network class(es) with same prefix...")
                     print("item to delete\n:",json.dumps(result,indent=1))
                     v.delEntry(dp,result,"bl")
+                    #delete network class with the same name if exists
+                    result2=v.getTable(dp,"class",policy_name)
+                    if result2:
+                        print("item to delete\n:",json.dumps(result2,indent=1))
+                        v.delEntry(dp,result2,"class")
+                    else:
+                        print("No network classes starting with ",policy_name)
+                        v.getTable(dp,"class",policy_name,1)
+                        banner("*")
                     v.UpdatePolicies(dp)
                 else:
+                    banner("*")
                     print("Blocklist policy:"+ policy_name +"_xxx not found.")
-                    banner()
+                    banner("*")
+                    v.getTable(dp,"bl",policy_name,1)
                 v.LockUnlockDP('unlock',dp)
         print("\nScript execution finished.\n")
     elif args.delNet:
@@ -476,8 +502,10 @@ def main():
                     v.delEntry(dp,result,"class")
                     v.UpdatePolicies(dp)
                 else:
+                    banner("*")
                     print("Network class:" + network_name + "_xxx not found.")
-                    banner()
+                    banner("*")
+                    result=v.getTable(dp,"class",network_name,1)
                 v.LockUnlockDP('unlock',dp)
         print("\nScript execution finished.\n")
     else:
@@ -503,7 +531,7 @@ def main():
         
         if args.push:
             print("Flag -p or --push is present. Sending config to Vision...")
-            print("Creating 1500 classes on 2 DP takes more than 4 minutes ...")
+            print("Creating 1500 classes on 2 DP takes more than 2 minutes ...")
             for dp in cfg.DefensePro_MGMT_IP:
                 if v.LockUnlockDP('lock',dp) != 200:
                     print("Unable to lock DP: ",dp)
