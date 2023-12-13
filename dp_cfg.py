@@ -23,7 +23,8 @@ Program uses following arguments:
 
 -i or --input: File containing subnets.
 One subnet/line with an IP (for a host) or a subnet (/32 is accepted).
-Invalid subnets will be displayed and not processed. Example: 1.1.1.1/24, 1.1.1.3/30 (not valid). Duplicate lines will be removed. Valid subnets will be saved to valid_subnets.txt.
+Invalid subnets will be displayed and not processed. Example: 1.1.1.1/24, 1.1.1.3/30 (not valid).
+Duplicate lines will be removed. Valid subnets will be saved to valid_subnets.txt.
 
 -n or --name: Name of the network class to create.
 The script will append _1, _2, etc., for each network class created.
@@ -44,10 +45,10 @@ Example command:
 if -p flag is used the config will be sent to DP
 
 Other arguments:
--dnet "name" : deletes network classes stating whith "name"
+-dnet "name" : deletes network classes stating whith "name" and ending with _XXX
     (name_1, name_2,etc)
     (requires -n)
--dbl "name" : deletes blocklist rule and network classes stating whith "name"
+-dbl "name" : deletes blocklist rule and network classes stating whith "name" and ending with _XXX
     (name_1, name_2,etc)
     (requires -b)
 
@@ -67,14 +68,13 @@ import config as cfg
 
 SUBNET_LIST = 'subnet_list.txt'  # stage 1 outpout file and stage 2 input file 
 VALID_SUBNETS = 'VALID_SUBNETS.TXT' # STAGE 2 OUTPOUT FILE AND STAGE 3 INPUT FILE
-CHUNK_SIZE = 250
+CHUNK_SIZE = 10
 
 urllib3.disable_warnings()
 
 
 class Vision:
-    """Class representing Vision/Cybercontroller obj"""
-
+    """Class representing Vision obj"""
     def __init__(self, ip, username, password):
         self.ip = ip
         self.login_data = {"username": username, "password": password}
@@ -88,7 +88,6 @@ class Vision:
         """Login to Vision"""
         print("Login to Vision...")
         login_url = self.base_url + '/mgmt/system/user/login'
-
         try:
             socket.gethostbyname(cfg.VISION_IP)
         except socket.gaierror as e:
@@ -111,7 +110,6 @@ class Vision:
 
     def lock_unlock_dp(self,action,dp):
         """Lock or unlock DP unit"""
-
         dp_lock_path = f"/mgmt/system/config/tree/device/byip/{dp}/"
         send_url = self.base_url + dp_lock_path + action
         r = self.sess.post(url=send_url, verify=False)
@@ -120,13 +118,16 @@ class Vision:
         print("URL:",send_url)
         print("Status code",r.status_code,r.content)
         banner()
-        return(r.status_code)
+        if r.status_code == 200:
+            return True
+        return False
     
     def add_net_class(self,net_class,dp):
-        """net_class is a dict with
-            # key (used in the URL) = network_class_name/index"
-            # value (used as json payload) = another dict with values (see below)
-                # { 'class_name/x : {'rsBWMNetworkAddress': '198.51.154.24', 'rsBWMNetworkMask': '32'} }
+        """
+        net_class is a dict with
+        key (used in the URL) = network_class_name/index"
+        value (used as json payload) = another dict with values (see below)
+        { 'class_name/x : {'rsBWMNetworkAddress': '198.51.154.24', 'rsBWMNetworkMask': '32'} }
         """
         dp_class_path = self.byip_cfg_path + f"/{dp}/config/rsBWMNetworkTable/"
         for net_name, json_data in net_class.items():
@@ -136,15 +137,15 @@ class Vision:
             print("Class name and index:",net_name)
             print("JSON payload:" , json_data)        
             r = self.sess.post(url=send_url, json=json_data, verify=False)
-            print(self.sess.post.__name__ ,"=>return code",r.status_code,r._content)
+            print(self.sess.post.__name__ ,"=>return code",r.status_code,r.content)
             banner("-")
         banner()
 
     def add_blk_policy(self,bl_policy,dp):
         """ bl_policy is a dict with"
-            # key (used in the URL) = policy_name"
-            # value (used as json payload) = another dict with values (see below)
-                # {'policy_name' : {'rsNewBlockListSrcNetwork': 'p2_1', 'rsNewBlockListDstNetwork': 'any'} }
+        # key (used in the URL) = policy_name"
+        # value (used as json payload) = another dict with values (see below)
+        # {'policy_name' : {'rsNewBlockListSrcNetwork': 'p2_1', 'rsNewBlockListDstNetwork': 'any'}}
         """
         dp_blk_pol_path = self.byip_cfg_path + f"/{dp}/config/rsNewBlockListTable/"
         for policy_name, json_data in bl_policy.items():
@@ -159,7 +160,6 @@ class Vision:
 
     def update_policies(self,dp):
         """Update policies for a DP"""
-        
         print("DP: ",dp,"- Update policy...")
         sig_list_url = self.base_url + self.byip_cfg_path + f"/{dp}/config/updatepolicies"
         print(sig_list_url)
@@ -168,13 +168,13 @@ class Vision:
         banner()
 
     def del_entry(self,dp,table,name):
-        """ Bloklist
-        # [ {"rsNewBlockListName": "block3_1", "rsNewBlockListSrcNetwork": "False_1"},
-        # {"rsNewBlockListName": "block3_2", "rsNewBlockListSrcNetwork": "False_2"} ]
-        # Network Class
-        # # {'rsBWMNetworkName': 'any', 'rsBWMNetworkSubIndex': '0'}
         """
-
+        Bloklist
+        [ {"rsNewBlockListName": "block3_1", "rsNewBlockListSrcNetwork": "False_1"},
+        {"rsNewBlockListName": "block3_2", "rsNewBlockListSrcNetwork": "False_2"} ]
+        Network Class
+        {'rsBWMNetworkName': 'any', 'rsBWMNetworkSubIndex': '0'}
+        """
         if name == "block_list":
             bl_names = [item["rsNewBlockListName"] for item in table]
             for bl in bl_names:
@@ -186,7 +186,7 @@ class Vision:
                 banner()
         else:
             # ex: net_id = [mylist_3/1,mylist_3/2]
-            net_id = [(item['rsBWMNetworkName'] + "/" + \
+            net_id = [(item['rsBWMNetworkName'] + "/" +\
                         item['rsBWMNetworkSubIndex']) for item in table]
             for net in net_id:
                 sig_list_url = self.base_url + \
@@ -197,63 +197,77 @@ class Vision:
                 banner()
 
     def get_table(self,dp,table,pol_name,show_full_table=0):
-        """  get blocklist or network class table
+        """
+        get blocklist or network class table
         function will return a dict for blocklist
         table="block_list" or network class table="net_class"
-        # dict key =  table name ;
-        # dict values = another dict with key = BL rule names and value = source network names
-        # 
-        # block list
-        # {'rsNewBlockListTable':[{'rsNewBlockListName': 'l', 'rsNewBlockListSrcNetwork': 'last4'},
-        #                      {'rsNewBlockListName': 'n1_1', 'rsNewBlockListSrcNetwork': 'n1_1'}]}
-        #network class
-        # {"rsBWMNetworkTable": [{'rsBWMNetworkName': 'any', 'rsBWMNetworkSubIndex': '0'}, 
-        #                       {'rsBWMNetworkName': '1r_3', 'rsBWMNetworkSubIndex': '2'}]}
+        dict key =  table name ;
+        dict values = another dict with key = BL rule names and value = source network names
+        block list:
+        {'rsNewBlockListTable':[{'rsNewBlockListName': 'l', 'rsNewBlockListSrcNetwork': 'last4'},
+                              {'rsNewBlockListName': 'n1_1', 'rsNewBlockListSrcNetwork': 'n1_1'}]}
+        network class:
+         {"rsBWMNetworkTable": [{'rsBWMNetworkName': 'any', 'rsBWMNetworkSubIndex': '0'}, 
+                               {'rsBWMNetworkName': '1r_3', 'rsBWMNetworkSubIndex': '2'}]}
         """
-
         if table == "block_list":
             tbl_dict='rsNewBlockListTable'
             tbl_item="rsNewBlockListName"
             print("DP: ",dp,"- Get Block List rules and src_network...")
             sig_list_url = self.base_url + self.byip_cfg_path + \
-             f"/{dp}/config/rsNewBlockListTable?props=rsNewBlockListName,rsNewBlockListSrcNetwork"
+             f"/{dp}/config/rsNewBlockListTable?props="+\
+                "rsNewBlockListName,rsNewBlockListSrcNetwork,rsNewBlockListDstNetwork"
         elif table == "net_class":
             tbl_dict="rsBWMNetworkTable"
-            tbl_item="rsBWMNetworkName"            
+            tbl_item="rsBWMNetworkName"
             print("DP: ",dp,"- Get NetClasses...")
             sig_list_url = self.base_url + self.byip_cfg_path + \
-                     f"/{dp}/config/rsBWMNetworkTable?props=rsBWMNetworkName,rsBWMNetworkSubIndex,rsBWMNetworkAddress,rsBWMNetworkMask"
-        else:
-            print("Table name required")
-            sys.exit(1)    
+               f"/{dp}/config/rsBWMNetworkTable?props="+\
+                "rsBWMNetworkName,rsBWMNetworkSubIndex,rsBWMNetworkAddress,rsBWMNetworkMask"
         print(sig_list_url)
         r = self.sess.get(url=sig_list_url, verify=False)
         print(self.sess.get.__name__ ,"=>return code",r.status_code)
         list_items = json.loads(r.content)
-        if show_full_table:
+        if show_full_table == 1:
             banner("*")
             print("FULL ",tbl_dict,"TABLE:\n",list_items)
             banner("*")
-       
-        #
-        # banner()
+        elif show_full_table == 2:
+            list_name = list(item for item in list_items.get(tbl_dict,"[]"))
+            return list_name
+        #Find table with required policy_name
         list_name = [item for item in list_items.get(tbl_dict,"[]") \
                         if find_value(item[tbl_item],pol_name)]
-        if len(list_name) :
-           return list_name
-        else:
-            return 0
+        if len(list_name):
+            return list_name
+        return False
 
+def find_dicts_with_value(key1, key2, value, dict_list):
+    """
+    Find values whithin a list of dict
+    key1,2 : dict key to look for 
+    value to search : search for value with _xxx suffix
+    (see find_value method)
+    dict_list: list of dict (blocklist or net class)
+    dict example:
+    [
+    {'rsNewBlockListName': 'i99_1', 'rsNewBlockListSrcNetwork': 'ip0_1',
+                                 'rsNewBlockListDstNetwork': 'ipp2_1'},
+    {'rsNewBlockListName': 'ip1_1', 'rsNewBlockListSrcNetwork': 'ip1_1',
+                                     'rsNewBlockListDstNetwork': 'any'}
+    ]    
+    """
+    matching_dict1 = [d for d in dict_list if key1 in d and find_value(d[key1],value)]
+    matching_dict2 = [d for d in dict_list if key2 in d and find_value(d[key2],value)]
+    return matching_dict1+matching_dict2
 
 def banner(char="="):
     """ Simple banner 100 column long"""
-
     print(char * 100)
 
 
 def get_time():
     """Time format"""
-
     end_time = datetime.datetime.now()
     return end_time.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -275,15 +289,13 @@ def find_value(find_txt,value):
     pattern = r'^'+ value + r'(_\d+$)'
     matches= re.search(pattern,find_txt,re.IGNORECASE)
     if matches:
-        #print(matches)
         return True
     return False
 
-def custom_sort(item):
+def suffix_sort(item):
     """ Extract the number part after the underscore and convert it to an integer
     # Ex: 'rere_1','rere_2','rere_3'
     """
-
     return int(item.rsplit('_',1)[1])
 
 
@@ -302,26 +314,29 @@ def remove_duplicates(input_file_path, output_file_path):
     total_lines = 0
 
     # Open the input file for reading
-    with open(input_file_path,mode='r',encoding='utf-8') as input_file:
-        # Read each line from the file
-        lines = input_file.readlines()
+    try :
+        with open(input_file_path,mode='r',encoding='utf-8') as input_file:
+            # Read each line from the file
+            lines = input_file.readlines()
 
-        # Iterate over the lines
-        for line in lines:
-            # Increment the total line count
-            total_lines += 1
+            # Iterate over the lines
+            for line in lines:
+                # Increment the total line count
+                total_lines += 1
 
-            # Strip leading and trailing whitespaces
-            cleaned_line = line.strip()
+                # Strip leading and trailing whitespaces
+                cleaned_line = line.strip()
 
-            # Check if the line is not in the set (i.e., it's unique)
-            if cleaned_line not in unique_lines:
-                # Add the line to the set
-                unique_lines.add(cleaned_line)
-            else:
-                # Increment the duplicate count
-                duplicate_count += 1
-
+                # Check if the line is not in the set (i.e., it's unique)
+                if cleaned_line not in unique_lines:
+                    # Add the line to the set
+                    unique_lines.add(cleaned_line)
+                else:
+                    # Increment the duplicate count
+                    duplicate_count += 1
+    except FileNotFoundError:
+        print("File not found:",input_file_path)
+        sys.exit(1)
 
     # Open the output file for writing
     with open(output_file_path, mode='w',encoding='utf-8') as output_file:
@@ -364,7 +379,7 @@ def validate_subnets(input_file, output_file):
 
 
 # STAGE3
-def gen_class_api(input_file_path,class_name,chunk=CHUNK_SIZE):
+def gen_class_dict(input_file_path,class_name,chunk=CHUNK_SIZE):
     """
     Process a text file with IP subnets,
     split the lines into chunks based on chunk size
@@ -377,7 +392,7 @@ def gen_class_api(input_file_path,class_name,chunk=CHUNK_SIZE):
     Default is 250.
 
     """
-    net_class_api={}
+    net_class_tbl={}
     key=""
     with open(input_file_path, mode='r',encoding='utf-8') as input_file:
         lines = input_file.readlines()
@@ -387,19 +402,17 @@ def gen_class_api(input_file_path,class_name,chunk=CHUNK_SIZE):
                 key = f'{class_name}_{i//chunk + 1}/{j}'
                 value = {'rsBWMNetworkAddress':f'{split_lines[0]}',\
                         'rsBWMNetworkMask':f'{split_lines[1].strip()}'}
-                net_class_api.update({key:value})
+                net_class_tbl.update({key:value})
     # returns a dictionnary with network classes
     # {'net_1':'rsBWMNetworkAddress': '18.51.154.216', 'rsBWMNetworkMask': '32'})
-    return net_class_api
+    return net_class_tbl
 
 
 # STAGE4
-def gen_bl_api(net_class,policy_name):
+def gen_bl_dict(net_class,policy_name):
     """
-    Return a dictionnary with BL rule
-    Parameters:
-    - network class dict
-    - policy name for the blocklist rule
+    Return a dictionnary with BL rule:
+    input: a network class dict
     The rule will have default settings: 
         src: network class
         dst: any 
@@ -407,37 +420,31 @@ def gen_bl_api(net_class,policy_name):
         ports: any
         protocol: any
     """
-    #  input is network class dict
-    # {'net_1':'rsBWMNetworkAddress': '18.51.154.216', 'rsBWMNetworkMask': '32'})
-    policy_api={}
+    # input is network class dict
+    # {'net_cls_1/1': {'rsBWMNetworkAddress': '1.51.154.21', 'rsBWMNetworkMask': '32'}}
+    policy_tbl={}
     src_net = set()
-    # extract net-class names from net class dictionnary
-    class_name = set([k for k in net_class.keys()])
-
-    # extract source net from class_name set (remove /1,/2,etc)
-    # add it to source network set and thus no duplicates
-    for item in class_name:
-        data=item.split("/")
-        src_net.add(data[0])
-
+    # extract net_class_name from class dict and remove index (/1, /2, etc)
+    # add it to source network SET to elimitate duplicates
+    for item in net_class.keys():
+        src_net.add(item.split("/")[0])
     # sort source network by number after rightmost "_"
     # see function "custom sort"
     # net_1,net_2 etc
-    src_net_sort = sorted(src_net,key=custom_sort)
-
+    src_net_sort = sorted(src_net,key=suffix_sort)
     # create policy name from source net name
     # from src_1,src_2,etc
     # to policy name : policyname_1,_2 etc
     for item in (src_net_sort):
-        pol_name =policy_name+ extract_suffix(item) # add suffix to policy name
+        pol_name = policy_name + extract_suffix(item) # add suffix to policy name
         #build json payload
         r={f'{pol_name}':{'rsNewBlockListSrcNetwork': f'{item}', 'rsNewBlockListDstNetwork': 'any'}}
-        policy_api.update(r)
-    # return a dict 
+        policy_tbl.update(r)
+    # return a dict
     # key = policy name
     # value = JSON payload to add the BL rule
     # {'policy-name_1': {'rsNewBlockListSrcNetwork': 'net2_1', 'rsNewBlockListDstNetwork': 'any'}}
-    return policy_api
+    return policy_tbl
 
 
 def main():
@@ -485,33 +492,37 @@ def main():
 
     # Parse the command-line arguments
     args = parser.parse_args()
+    print(args)
     input_file = args.input
     policy_name = args.blocklist
     network_name = args.network if args.network else args.blocklist
     print("Script started at:", get_time())
+
+    v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
+
     if args.delBL:
         if not policy_name:
             print("Missing blocklist policy name")
             sys.exit(1)
-        v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
+        #v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
         print("Flag -dbl is present. Flag -dnet is ignored...")
         for dp in cfg.DefensePro_MGMT_IP:
-            if v.lock_unlock_dp('lock',dp) != 200:
+            if not v.lock_unlock_dp('lock',dp):
                 print("Unable to lock DP: ",dp)
                 continue
-            result=v.get_table(dp,"block_list",policy_name,0)
-            if result:
+            bl_table=v.get_table(dp,"block_list",policy_name,0)
+            if bl_table:
                 print("Deleting Blocklist and Network class(es) with same prefix...")
-                print("item to delete\n:",json.dumps(result,indent=1))
-                v.del_entry(dp,result,"block_list")
+                print("item to delete\n:",json.dumps(bl_table,indent=1))
+                v.del_entry(dp,bl_table,"block_list")
                 #delete network class with the same name if exists
-                result2=v.get_table(dp,"net_class",policy_name)
-                if result2:
-                    print("item to delete\n:",json.dumps(result2,indent=1))
-                    v.del_entry(dp,result2,"net_class")
+                net_table=v.get_table(dp,"net_class",policy_name)
+                if net_table:
+                    print("item to delete\n:",json.dumps(net_table,indent=1))
+                    v.del_entry(dp,net_table,"net_class")
                 else:
-                    print("No network classes starting with ",policy_name)
-                    v.get_table(dp,"net_class",policy_name,1)
+                    print("No network classes starting with:",policy_name,"_xxx")
+                    #v.get_table(dp,"net_class",policy_name,1)
                     banner("*")
                 v.update_policies(dp)
             else:
@@ -519,6 +530,7 @@ def main():
                 print("Blocklist policy:"+ policy_name +"_xxx not found.")
                 banner("*")
                 v.get_table(dp,"block_list",policy_name,1)
+                banner("*")
             v.lock_unlock_dp('unlock',dp)
         print("\nScript execution finished.\n")
     elif args.delNet:
@@ -526,21 +538,32 @@ def main():
         if not network_name:
             print("Missing network class name")
             sys.exit(1)
-        v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
+        #v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
         for dp in cfg.DefensePro_MGMT_IP:
-            if v.lock_unlock_dp('lock',dp) != 200:
+            if not v.lock_unlock_dp('lock',dp):
                 print("Unable to lock DP: ",dp)
                 continue
-            result=v.get_table(dp,"net_class",network_name)
-            if result:
-                print("item to delete\n:",json.dumps(result,indent=1))
-                v.del_entry(dp,result,"net_class")
-                v.update_policies(dp)
+            net_class_tbl=v.get_table(dp,"net_class",network_name)
+            #print("net class",net_class_tbl,"--",network_name)
+            if net_class_tbl:
+                get_bl=v.get_table(dp,"block_list",network_name,2)
+                value_found=find_dicts_with_value('rsNewBlockListSrcNetwork', \
+                                                  'rsNewBlockListDstNetwork',network_name,get_bl)
+                if not value_found:
+                    print("item to delete\n:",json.dumps(net_class_tbl,indent=1))
+                    v.del_entry(dp,net_class_tbl,"net_class")
+                    v.update_policies(dp)
+                else:
+                    banner()
+                    print(f"This network class ({network_name})"+ \
+                            "_xxx is used by a Blocklist entry, it can not be deleted.")
+                    #print(json.dumps(net_class_tbl,indent=1))
+                    print(json.dumps(value_found,indent=2))
             else:
                 banner("*")
                 print("Network class:" + network_name + "_xxx not found.")
                 banner("*")
-                result=v.get_table(dp,"net_class",network_name,1)
+                net_class_tbl=v.get_table(dp,"net_class",network_name,1)
             v.lock_unlock_dp('unlock',dp)
         print("\nScript execution finished.\n")
     else:
@@ -551,7 +574,10 @@ def main():
         if not policy_name:
             print("Missing blocklist policy name")
             sys.exit(1)
-        v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
+        elif not args.input:
+            print("Missing file name")
+            sys.exit(1)
+        #v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
         # STAGE 1 - clean file, remove duplicates
         remove_duplicates(input_file, SUBNET_LIST)
 
@@ -559,15 +585,15 @@ def main():
         validate_subnets(SUBNET_LIST, VALID_SUBNETS)
 
         # STAGE 3 - generate network class dict
-        net_class  = gen_class_api(VALID_SUBNETS,network_name)
+        net_class  = gen_class_dict(VALID_SUBNETS,network_name)
 
         # STAGE 4 - blocklist policy dict
-        blk_policy = gen_bl_api(net_class,policy_name)
+        blk_policy = gen_bl_dict(net_class,policy_name)
         if args.push:
             print("Flag -p or --push is present. Sending config to Vision...")
             print("Creating 1500 classes on 2 DP takes more than 2 minutes ...")
             for dp in cfg.DefensePro_MGMT_IP:
-                if v.lock_unlock_dp('lock',dp) != 200:
+                if not v.lock_unlock_dp('lock',dp):
                     print("Unable to lock DP: ",dp)
                     continue
                 v.add_net_class(net_class,dp)
