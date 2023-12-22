@@ -32,8 +32,8 @@ Each class will have a maximum of 250 subnets.
 
 -b or --blocklist: Name of the blocklist to create.
 If "-n" is not used network classes will have same prefix as blocklist rule
-
 The script will append _1, _2, etc., for each blocklist rule created.
+
 Blocklist rule will be configured with default settings:
     Source network: from the script
     Destination network: any
@@ -48,7 +48,7 @@ Other arguments:
 -dnet "name" : deletes network classes stating whith "name" and ending with _XXX
     (name_1, name_2,etc)
     (requires -n)
--dbl "name" : deletes blocklist rule and network classes stating whith "name" and ending with _XXX
+-dbl "name" : deletes blocklist rule AND network classes stating whith "name" and ending with _XXX
     (name_1, name_2,etc)
     (requires -b)
 
@@ -97,7 +97,7 @@ class Vision:
             r = self.sess.post(url=login_url, json=self.login_data, verify=False)
             r.raise_for_status()
             response = r.json()
-        except (requests.exceptions.HTTPError, requests.exceptions.ConnectionError, 
+        except (requests.exceptions.HTTPError, requests.exceptions.ConnectionError,
                 requests.exceptions.SSLError,requests.exceptions.Timeout,
                 requests.exceptions.ConnectTimeout,requests.exceptions.ReadTimeout) as err:
             raise SystemExit(err) from err
@@ -298,6 +298,15 @@ def suffix_sort(item):
     """
     return int(item.rsplit('_',1)[1])
 
+def check_single_entry_and_match(data):
+    # Check if the list has only one entry
+    if len(data) == 1:
+        entry = data[0]
+        # Check if 'rsNewBlockListName' is equal to 'rsNewBlockListSrcNetwork'
+        if entry.get('rsNewBlockListName') == entry.get('rsNewBlockListSrcNetwork'):
+            return True
+
+    return False
 
 # STAGE 1
 def remove_duplicates(input_file_path, output_file_path):
@@ -455,12 +464,14 @@ def main():
     using Vision API.
     Use "-p or (--push)" option to send the commands to the DP.
 
-    Use -dbl to delete block list policy ; requires -b
-        Policy name FORMAT: "policy-name_xx" (xx - numbers)
-    THIS OPTION WILL ALSO DELETE NETWORK CLASSES WITH THE SAME PREFIX !
+    Use -dbl <policy_name_prefix> to delete block list policy ; requires -b
 
-    Use -dnet to delete speific network classes ; requires -n
-        Network class FORMAT: "network-name_xx" (xx - numbers)
+    Script will look for policies with name: "policy_name_xx" (xx - numbers)
+    THIS OPTION WILL ALSO DELETE NETWORK CLASSES 
+    STARTING WITH THE SAME PREFIX !
+
+    Use -dnet <network_class_prefix> to delete speific network classes ; requires -n
+    Script will look for policies with name: "net_class_name_xx" (xx - numbers)
     
     example: python dp_cfg.py  -b pk_bl   -dbl
         delete all blocklist policies
@@ -511,26 +522,36 @@ def main():
                 print("Unable to lock DP: ",dp)
                 continue
             bl_table=v.get_table(dp,"block_list",policy_name,0)
+            bl_full= v.get_table(dp,"block_list",policy_name,2)
             if bl_table:
                 print("Deleting Blocklist and Network class(es) with same prefix...")
                 print("item to delete\n:",json.dumps(bl_table,indent=1))
                 v.del_entry(dp,bl_table,"block_list")
                 #delete network class with the same name if exists
                 net_table=v.get_table(dp,"net_class",policy_name)
-                if net_table:
+                value_found=find_dicts_with_value('rsNewBlockListSrcNetwork', \
+                                                  'rsNewBlockListDstNetwork',network_name,bl_full)                
+                if net_table and check_single_entry_and_match(value_found):
                     print("item to delete\n:",json.dumps(net_table,indent=1))
                     v.del_entry(dp,net_table,"net_class")
                 else:
-                    print("No network classes starting with:",policy_name,"_xxx")
-                    #v.get_table(dp,"net_class",policy_name,1)
+                    if value_found:
+                        print(f"This network class ({network_name})"+ \
+                            "_xxx is used by a Blocklist entry, it can not be deleted.")
+                        print(json.dumps(value_found,indent=2))
+                    else:
+                        banner("*")
+                        print("No network classes starting with:",policy_name,"_xxx")
                     banner("*")
                 v.update_policies(dp)
             else:
                 banner("*")
-                print("Blocklist policy:"+ policy_name +"_xxx not found.")
-                banner("*")
-                v.get_table(dp,"block_list",policy_name,1)
-                banner("*")
+                if len(bl_full) != 0:
+                    print("Blocklist policy:"+ policy_name +"_xxx not found.")
+                    banner("*")
+                    print(json.dumps(bl_full,indent=2))
+                else:
+                    print("No blocklist policies defined")
             v.lock_unlock_dp('unlock',dp)
         print("\nScript execution finished.\n")
     elif args.delNet:
@@ -557,7 +578,6 @@ def main():
                     banner()
                     print(f"This network class ({network_name})"+ \
                             "_xxx is used by a Blocklist entry, it can not be deleted.")
-                    #print(json.dumps(net_class_tbl,indent=1))
                     print(json.dumps(value_found,indent=2))
             else:
                 banner("*")
