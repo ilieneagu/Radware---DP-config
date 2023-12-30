@@ -68,7 +68,7 @@ import config as cfg
 
 SUBNET_LIST = 'subnet_list.txt'  # stage 1 outpout file and stage 2 input file 
 VALID_SUBNETS = 'VALID_SUBNETS.TXT' # STAGE 2 OUTPOUT FILE AND STAGE 3 INPUT FILE
-CHUNK_SIZE = 10
+CHUNK_SIZE = 250
 
 urllib3.disable_warnings()
 
@@ -121,7 +121,7 @@ class Vision:
         if r.status_code == 200:
             return True
         return False
-    
+
     def add_net_class(self,net_class,dp):
         """
         net_class is a dict with
@@ -173,7 +173,7 @@ class Vision:
         [ {"rsNewBlockListName": "block3_1", "rsNewBlockListSrcNetwork": "False_1"},
         {"rsNewBlockListName": "block3_2", "rsNewBlockListSrcNetwork": "False_2"} ]
         Network Class
-        {'rsBWMNetworkName': 'any', 'rsBWMNetworkSubIndex': '0'}
+        [{'rsBWMNetworkName': 'any', 'rsBWMNetworkSubIndex': '0'}]
         """
         if name == "block_list":
             bl_names = [item["rsNewBlockListName"] for item in table]
@@ -235,11 +235,12 @@ class Vision:
         elif show_full_table == 2:
             list_name = list(item for item in list_items.get(tbl_dict,"[]"))
             return list_name
-        #Find table with required policy_name
-        list_name = [item for item in list_items.get(tbl_dict,"[]") \
+        else:
+            #Find table with required policy_name
+            list_name = [item for item in list_items.get(tbl_dict,"[]") \
                         if find_value(item[tbl_item],pol_name)]
-        if len(list_name):
-            return list_name
+            if len(list_name):
+                return list_name
         return False
 
 def find_dicts_with_value(key1, key2, value, dict_list):
@@ -299,14 +300,62 @@ def suffix_sort(item):
     return int(item.rsplit('_',1)[1])
 
 def check_single_entry_and_match(data):
-    # Check if the list has only one entry
+    """ Check if the list has only one entry """
     if len(data) == 1:
         entry = data[0]
         # Check if 'rsNewBlockListName' is equal to 'rsNewBlockListSrcNetwork'
         if entry.get('rsNewBlockListName') == entry.get('rsNewBlockListSrcNetwork'):
             return True
-
     return False
+
+def net_class_to_delete(data,net_list):
+    """
+    Check data for used SRC or DST network name from a list of network names 
+    exept if block list name = net-list name
+    data = [{'rsNewBlockListName': 'bad_1', 'rsNewBlockListSrcNetwork': 'bad_1', 
+            'rsNewBlockListDstNetwork': 'any'}, {'rsNewBlockListName': 'bad_12', 
+            'rsNewBlockListSrcNetwork': 'bad_2', 'rsNewBlockListDstNetwork': 'any'}]
+    returns a list of net names that are not used of in blocklist
+    """
+    net_class=net_list[:]
+    for value in net_list:
+        for item in (data):
+            #print(item)
+            if value == item.get("rsNewBlockListSrcNetwork") or \
+                  value == item.get("rsNewBlockListDstNetwork"):
+                if value != item.get("rsNewBlockListName"):
+                    net_class.remove(value)
+    return net_class
+
+def list_net_class(table):
+    """
+    Return a list with SRC and DST network names from this dict list except when network = any
+    [{'rsNewBlockListName': 'ipiep_1', 'rsNewBlockListSrcNetwork': 'ipip_1',
+      'rsNewBlockListDstNetwork': 'ipip_2'}, {'rsNewBlockListName': 'iepip_2', 
+      'rsNewBlockListSrcNetwork': 'ipip_2', 'rsNewBlockListDstNetwork': 'any_ipv4'}]
+    """
+    net_class_list=[]
+    for _ in table:
+        if _.get('rsNewBlockListSrcNetwork') != "any" and \
+              _.get('rsNewBlockListSrcNetwork') != "any_ipv4":
+            net_class_list.append(_.get('rsNewBlockListSrcNetwork'))
+        if _.get('rsNewBlockListDstNetwork') != "any" and \
+            _.get('rsNewBlockListDstNetwork') != "any_ipv4":
+            net_class_list.append(_.get('rsNewBlockListDstNetwork'))
+    return net_class_list
+
+def get_net_class(class_list,table):
+    """
+    extract Net class from a netclass table based on a list of net classes
+    """
+    result=[]
+    for i in table:
+        for _ in class_list:
+            if _ == i.get('rsBWMNetworkName'):
+                #print(i.get('rsBWMNetworkName'),i.get('rsBWMNetworkSubIndex'))
+                result += [{'rsBWMNetworkName':i.get('rsBWMNetworkName'),\
+                            'rsBWMNetworkSubIndex':i.get('rsBWMNetworkSubIndex')}]
+    return result
 
 # STAGE 1
 def remove_duplicates(input_file_path, output_file_path):
@@ -515,7 +564,6 @@ def main():
         if not policy_name:
             print("Missing blocklist policy name")
             sys.exit(1)
-        #v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
         print("Flag -dbl is present. Flag -dnet is ignored...")
         for dp in cfg.DefensePro_MGMT_IP:
             if not v.lock_unlock_dp('lock',dp):
@@ -523,26 +571,21 @@ def main():
                 continue
             bl_table=v.get_table(dp,"block_list",policy_name,0)
             bl_full= v.get_table(dp,"block_list",policy_name,2)
+            net_full= v.get_table(dp,"net_class",network_name,2)
+
             if bl_table:
                 print("Deleting Blocklist and Network class(es) with same prefix...")
                 print("item to delete\n:",json.dumps(bl_table,indent=1))
+                net_list=list_net_class(bl_table)
+                check_net_class=net_class_to_delete(bl_full,net_list)
                 v.del_entry(dp,bl_table,"block_list")
-                #delete network class with the same name if exists
-                net_table=v.get_table(dp,"net_class",policy_name)
-                value_found=find_dicts_with_value('rsNewBlockListSrcNetwork', \
-                                                  'rsNewBlockListDstNetwork',network_name,bl_full)                
-                if net_table and check_single_entry_and_match(value_found):
-                    print("item to delete\n:",json.dumps(net_table,indent=1))
+                if check_net_class:
+                    net_table=get_net_class(check_net_class,net_full)
+                    print("Network class that can be deleted: ",check_net_class)
                     v.del_entry(dp,net_table,"net_class")
                 else:
-                    if value_found:
-                        print(f"This network class ({network_name})"+ \
-                            "_xxx is used by a Blocklist entry, it can not be deleted.")
-                        print(json.dumps(value_found,indent=2))
-                    else:
-                        banner("*")
-                        print("No network classes starting with:",policy_name,"_xxx")
-                    banner("*")
+                    print(f"This network class ({network_name})"+ \
+                         "_xxx is used by a Blocklist entry, it can not be deleted.")
                 v.update_policies(dp)
             else:
                 banner("*")
@@ -559,13 +602,11 @@ def main():
         if not network_name:
             print("Missing network class name")
             sys.exit(1)
-        #v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
         for dp in cfg.DefensePro_MGMT_IP:
             if not v.lock_unlock_dp('lock',dp):
                 print("Unable to lock DP: ",dp)
                 continue
             net_class_tbl=v.get_table(dp,"net_class",network_name)
-            #print("net class",net_class_tbl,"--",network_name)
             if net_class_tbl:
                 get_bl=v.get_table(dp,"block_list",network_name,2)
                 value_found=find_dicts_with_value('rsNewBlockListSrcNetwork', \
@@ -597,7 +638,6 @@ def main():
         elif not args.input:
             print("Missing file name")
             sys.exit(1)
-        #v = Vision(cfg.VISION_IP, cfg.VISION_USER, cfg.VISION_PASS)
         # STAGE 1 - clean file, remove duplicates
         remove_duplicates(input_file, SUBNET_LIST)
 
