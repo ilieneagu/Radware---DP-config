@@ -25,8 +25,7 @@ You need to modify `config.py` for your environment. Update the following parame
 2.  **Run `dp_cfg.py` with the following arguments:**
     
     -   `-i` or `--input`: File containing subnets. One subnet/line with an IP (for a host) or a subnet (/32 is accepted). Invalid subnets will be displayed and not processed. Example: `1.1.1.1/24`, `1.1.1.3/30` (not valid). Duplicate lines will be removed. Valid subnets will be saved to **`valid_subnets.txt`**.
-        
-    -   `-n` or `--name`: Name of the network class to create. The script will append `_1`, `_2`, etc., for each network class created. Each class will have a maximum of 250 subnets.
+
         
     -   `-b` or `--blocklist`: Name of the blocklist to create. The script will append `_1`, `_2`, etc., for each blocklist rule created. Blocklist rule will be configured with default settings:        
         -   Source network: from the script
@@ -35,7 +34,7 @@ You need to modify `config.py` for your environment. Update the following parame
         -   Port: any
     
 Example command:
-`python dp_cfg.py -i input_file.txt -n network_class_name -b blocklist_name` 
+`python dp_cfg.py -i input_file.txt -b blocklist_name` 
     
 3.  **Save CLI Commands to Files**
     
@@ -52,13 +51,10 @@ Example command:
         
         `dp block-allow-lists blocklist table create b1_1 -sn net1_1 -dn any_ipv4 -a drop` 
         
-4.  **Push Configuration to DP (Optional)**
+4.  **Push Configuration to DP ()**
     
-    If you also use the `-p` or `--push` argument, the configuration will be pushed to DefensePro with Vision API calls.
-    Details of Vision commands will be saved to **`output.log`**.
+    The configuration will be pushed to DefensePro with Vision API calls.
     
-    Example command:    
-    `python dp_cfg.py -i input_file.txt -n network_class_name -b blocklist_name -p`
 
 # Disclaimer
 There is no warranty, expressed or implied, associated with this scripot. Use at your own risk.
